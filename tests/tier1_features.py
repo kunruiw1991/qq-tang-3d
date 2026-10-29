@@ -310,7 +310,7 @@ def test_f03_bubble_drop_centers_on_tile_and_increments_active_count(h: QQTangTe
   )
   assert res["bubbleCount"] == 1, res
   assert res["col"] == 5 and res["row"] == 6, res
-  assert 2.85 <= res["fuse"] <= 3.05, res
+  assert 2.45 <= res["fuse"] <= 2.65, res
   assert res["activeBubbles"] == 1 and res["placedStat"] == 1, res
 
 
@@ -434,9 +434,9 @@ def test_f05_fuse_countdown_detonates_at_3_seconds_and_refunds_quota(h: QQTangTe
       return { tickDrop: s0.sim.tick, fuseMid, detonateTick, blastsAtDetonate, activeAfter };
       """
   )
-  assert 0.8 <= res["fuseMid"] <= 1.5, res
+  assert 0.65 <= res["fuseMid"] <= 1.5, res
   elapsed_ticks = res["detonateTick"] - res["tickDrop"]
-  assert 175 <= elapsed_ticks <= 185, (elapsed_ticks, res)
+  assert 150 <= elapsed_ticks <= 162, (elapsed_ticks, res)
   assert res["blastsAtDetonate"] >= 1 and res["activeAfter"] == 0, res
 
 
@@ -1635,6 +1635,7 @@ def test_f23_mode_classic_2v2_teams_and_elimination_victory(h: QQTangTestHarness
         p1CharacterId: 'miduo', // range 2
         seed: 1701,
         botBehavior: 'idle',
+        classicTeamLives: 2,
         customGrid: makeGrid(),
         customSpawns: [
           { id: 'p1', col: 5, row: 6, team: 0 },
@@ -2051,6 +2052,7 @@ def test_f28_audio_tracks_switch_across_menu_arena_boss_and_podium(
         p1CharacterId: 'miduo',
         seed: 1804,
         botBehavior: 'idle',
+        classicTeamLives: 2,
         customGrid: makeGrid(),
         customSpawns: [
           { id: 'p1', col: 5, row: 6, team: 0 },

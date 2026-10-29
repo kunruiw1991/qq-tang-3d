@@ -411,11 +411,11 @@ def test_t5_07_sliding_kicked_bubble_intercepted_mid_flight_by_active_blast_deto
       pulseDropBubble('p1');
       moveHold('p1', -1, 0, 25);
 
-      // Advance to frame 150, then p2 drops at (3, 6), steps West, and kicks East across col 7 right as p1's blast lingers!
-      api.stepFrames(124);
+      // Advance to frame 126, then p2 drops at (3, 6), steps West, and kicks East across col 7 right as p1's 2.6s (156f) blast lingers!
+      api.stepFrames(100);
       pulseDropBubble('p2');
-      moveHold('p2', -1, 0, 18); // tick ~ 168
-      moveHold('p2', 1, 0, 14);  // kick initiated around tick 178..182 while p1's blast lingers [180..204]!
+      moveHold('p2', -1, 0, 18); // tick ~ 144
+      moveHold('p2', 1, 0, 14);  // kick initiated around tick 154..158 while p1's blast lingers [156..183]!
 
       let sawChain = false;
       for (let i = 0; i < 35; i += 1) {
@@ -650,24 +650,24 @@ def test_t5_11_cyclic_figure8_bubble_network_detonates_in_single_tick_zero_quota
           { id: 'bot3', col: 13, row: 11, team: 1 },
         ],
         startingLoadout: {
-          p1: { maxBubbles: 8, blastRange: 3, baseSpeed: 7.2 },
-          p2: { maxBubbles: 7, blastRange: 3, baseSpeed: 7.5 },
+          p1: { maxBubbles: 8, blastRange: 3, baseSpeed: 8.5 },
+          p2: { maxBubbles: 7, blastRange: 3, baseSpeed: 8.5 },
         },
       });
       // Build an 8-bubble cyclic loop across cols 4..6 and 7..9 so rays cross in a cycle
       const p1Spots = [[4, 5], [5, 5], [6, 5], [6, 6], [5, 6], [4, 6]];
       for (const [c, r] of p1Spots) {
-        steerToWorld('p1', 'p1', c + 0.5, r + 0.5, 20);
+        steerToWorld('p1', 'p1', c + 0.5, r + 0.5, 14);
         pulseDropBubble('p1');
       }
-      steerToWorld('p1', 'p1', 1.5, 1.5, 45);
+      steerToWorld('p1', 'p1', 1.5, 1.5, 28);
 
       const p2Spots = [[7, 5], [8, 5], [8, 6], [7, 6]];
       for (const [c, r] of p2Spots) {
-        steerToWorld('p2', 'p2', c + 0.5, r + 0.5, 20);
+        steerToWorld('p2', 'p2', c + 0.5, r + 0.5, 14);
         pulseDropBubble('p2');
       }
-      steerToWorld('p2', 'p2', 1.5, 11.5, 55);
+      steerToWorld('p2', 'p2', 1.5, 11.5, 32);
 
       const preCount = api.getState().sim.bubbles.length;
       let chainTickBubblesBefore = preCount;
@@ -923,8 +923,8 @@ def test_t5_15_bun_grab_regulation_tie_triggers_overtime_and_golden_bun_sudden_d
           { id: 'bot3', col: 13, row: 11, team: 1 },
         ],
       });
-      // Advance full 150s regulation (9000 ticks) with 0-0 score -> must enter 20s Overtime!
-      const stOt = api.stepFrames(9001);
+      // Advance full 120s regulation (7200 ticks) with 0-0 score -> must enter 20s Overtime!
+      const stOt = api.stepFrames(7201);
       const otScreen = stOt.uiScreen;
       const otPhase = stOt.sim.phase;
       const otRemaining = stOt.sim.timeRemainingSec;
@@ -1006,6 +1006,7 @@ def test_t5_17_classic_2v2_simultaneous_mutual_all_team_wipe_resolves_determinis
         p1CharacterId: 'miduo',
         seed: 5017,
         botBehavior: 'idle',
+        classicTeamLives: 2,
         customGrid: makeGrid(),
         customSpawns: [
           { id: 'p1', col: 7, row: 5, team: 0 },
@@ -1660,4 +1661,639 @@ def test_t5_28_bot_proportional_steering_zero_overshoot_dithering_on_ufo_and_ska
   assert res["totalBotTicks"] >= 1000, res
   assert res["revPct"] < 3.0, f"Bot reversal fraction >= 3%: {res}"
   assert res["maxStreak"] < 20, f"Bot consecutive reversal streak >= 20: {res}"
+
+
+# ==============================================================================
+# Group 5E: Fun Overhaul Mechanics (Stock Lives, 糖果雨, Hit-Stop, Difficulty,
+# Follow-Cam, Countdown, Boss Hero 2x Damage, Popups, 68px HUD, Hall Progress)
+# ==============================================================================
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_29_classic_stock_lives_respawn_invuln_and_zero_hearts_loss(
+    h: QQTangTestHarness,
+) -> None:
+  _ensure_loaded(h)
+  res = h.run_sim_js(
+      """
+      const s0 = api.startMatch({
+        deterministic: true,
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        seed: 5029,
+        botBehavior: 'idle',
+        customGrid: makeGrid(),
+        customSpawns: [
+          { id: 'p1', col: 5, row: 6, team: 0 },
+          { id: 'bot1', col: 1, row: 11, team: 0 },
+          { id: 'bot2', col: 6, row: 6, team: 1 },
+          { id: 'bot3', col: 13, row: 11, team: 1 },
+        ],
+      });
+      const initialHearts = { ...s0.sim.teamStockLives };
+
+      // Pop bot2 once -> Red loses 1 heart (3 -> 2), match continues, bot2 respawns after 2.5s (150f) with 2.0s invuln!
+      pulseDropBubble('p1');
+      steerToWorld('p1', 'p1', 4.5, 7.5, 40, 0.08);
+      // Wait until bubble detonates AND 0.45s (27f) blast linger finishes completely!
+      while (api.getState().sim.bubbles.length > 0 || api.getState().sim.blasts.length > 0) {
+        api.stepFrames(5);
+      }
+      const stPop1 = steerToWorld('p1', 'p1', 6.5, 6.5, 50, 0.08);
+      const heartsAfterPop1 = { ...stPop1.sim.teamStockLives };
+      const bot2Elim = getPlayer(stPop1, 'bot2');
+
+      // Step 155 frames (~2.58s) -> bot2 respawns at its spawn pad (6, 6) with ~2.0s invuln!
+      const stResp = api.stepFrames(155);
+      const bot2Resp = getPlayer(stResp, 'bot2');
+
+      // Wait out 2.0s invuln (125 frames), then pop bot2 two more times so Red reaches 0 hearts -> immediate Blue victory!
+      api.stepFrames(130);
+      for (let k = 0; k < 2; k += 1) {
+        steerToWorld('p1', 'p1', 5.5, 6.5, 40, 0.08);
+        pulseDropBubble('p1');
+        steerToWorld('p1', 'p1', 4.5, 7.5, 40, 0.08);
+        while (api.getState().sim.bubbles.length > 0 || api.getState().sim.blasts.length > 0) {
+          api.stepFrames(5);
+        }
+        steerToWorld('p1', 'p1', 6.5, 6.5, 50, 0.08);
+        if (api.getState().sim.phase !== 'playing') break;
+        api.stepFrames(285); // wait respawn + invuln
+      }
+      const stEnd = api.getState();
+      return {
+        initialHearts,
+        heartsAfterPop1,
+        bot2ElimState: bot2Elim.state,
+        bot2RespState: bot2Resp.state,
+        bot2RespInvuln: bot2Resp.invulnTimer,
+        endPhase: stEnd.sim.phase,
+        endHearts: stEnd.sim.teamStockLives,
+        winningTeam: stEnd.sim.winningTeam,
+      };
+      """
+  )
+  assert res["initialHearts"] == {"blue": 3, "red": 3}, res
+  assert res["heartsAfterPop1"] == {"blue": 3, "red": 2}, res
+  assert res["bot2ElimState"] == "eliminated", res
+  assert res["bot2RespState"] == "alive" and res["bot2RespInvuln"] >= 1.7, res
+  assert res["endPhase"] == "victory" and res["winningTeam"] == 0, res
+  assert res["endHearts"]["red"] == 0, res
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_30_classic_candy_rain_sudden_death_spiral_crushes_and_vaporizes(
+    h: QQTangTestHarness,
+) -> None:
+  _ensure_loaded(h)
+  res = h.run_sim_js(
+      """
+      api.startMatch({
+        deterministic: true,
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        seed: 5030,
+        botBehavior: 'idle',
+        matchDurationSec: 32.0,
+        customGrid: makeGrid(),
+        customSpawns: [
+          { id: 'p1', col: 7, row: 6, team: 0 },
+          { id: 'bot1', col: 7, row: 7, team: 0 },
+          { id: 'bot2', col: 1, row: 1, team: 1 }, // on first spiral tile (1, 1)!
+          { id: 'bot3', col: 11, row: 6, team: 1 },
+        ],
+        customPickups: [
+          { type: 'speed', col: 2, row: 1 }, // on second spiral tile (2, 1)!
+        ],
+      });
+      // Advance 65 frames (~1.08s -> 30.92s remaining, 1s before 30.0s Candy Rain): warning stamp + rumble SFX trigger!
+      const stWarn = api.stepFrames(65);
+      const stampEl = document.querySelector('[data-testid="hud-candy-rain-stamp"]');
+      const stampVisibleAtWarn = Boolean(stampEl && !stampEl.hidden && stampEl.getBoundingClientRect().height > 0);
+      const stampText = stampEl ? stampEl.textContent : '';
+
+      // Advance another 95 frames (total 160f -> 29.33s remaining) so tiles (1, 1) and (2, 1) drop at 0.5s intervals!
+      const st = api.stepFrames(95);
+      const bot2 = getPlayer(st, 'bot2');
+      return {
+        warnActiveAt31s: stWarn.sim.candyRainWarningActive,
+        suddenDeathAt31s: stWarn.sim.suddenDeathActive,
+        stampVisibleAtWarn,
+        stampText,
+        rumbleCount: st.audio.candyRainRumbleCount,
+        suddenDeathActive: st.sim.suddenDeathActive,
+        candyRainIndex: st.sim.candyRainIndex,
+        tile11: st.sim.grid[1][1],
+        tile21: st.sim.grid[1][2],
+        pickupsLeft: st.sim.pickups.length,
+        bot2State: bot2.state,
+        redHearts: st.sim.teamStockLives.red,
+      };
+      """
+  )
+  assert res["warnActiveAt31s"] is True and res["suddenDeathAt31s"] is False, res
+  assert res["stampVisibleAtWarn"] is True and "糖果雨来了" in res["stampText"], res
+  assert res["rumbleCount"] >= 1, res
+  assert res["suddenDeathActive"] is True and res["candyRainIndex"] >= 2, res
+  assert res["tile11"] == 1 and res["tile21"] == 1, res
+  assert res["pickupsLeft"] == 0, res
+  assert res["bot2State"] == "eliminated" and res["redHearts"] == 2, res
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_31_hit_stop_70ms_trap_and_110ms_ko_freeze_sim_while_rendering(
+    h: QQTangTestHarness,
+) -> None:
+  _ensure_loaded(h)
+  res = h.run_sim_js(
+      """
+      api.startMatch({
+        deterministic: true,
+        respectHitStop: true,
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        seed: 5031,
+        botBehavior: 'idle',
+        customGrid: makeGrid(),
+        customSpawns: [
+          { id: 'p1', col: 5, row: 6, team: 0 },
+          { id: 'bot1', col: 1, row: 11, team: 0 },
+          { id: 'bot2', col: 6, row: 6, team: 1 },
+          { id: 'bot3', col: 13, row: 11, team: 1 },
+        ],
+      });
+      pulseDropBubble('p1');
+      moveHold('p1', -1, 0, 18);
+      moveHold('p1', 0, 1, 18);
+
+      // Step frame-by-frame until TRAP fires on bot2
+      let trapState = null;
+      for (let i = 0; i < 140; i += 1) {
+        const st = api.stepFrames(1, { respectHitStop: true });
+        if (st.hitStopCount >= 1) {
+          trapState = st;
+          break;
+        }
+      }
+      const tickAtTrap = trapState.sim.tick;
+      const trapHitStopSec = trapState.lastHitStopSec;
+      // Next 2 frames must freeze sim.tick while hitStopRemainingSec > 0!
+      const stFreeze1 = api.stepFrames(2, { respectHitStop: true });
+      const tickDuringTrapFreeze = stFreeze1.sim.tick;
+
+      // Clear remaining trap hit-stop AND wait for 0.45s (27f) blast linger to clear before p1 walks onto (6, 6)!
+      api.stepFrames(40, { respectHitStop: true });
+      moveHold('p1', 0, -1, 18);
+      let koState = null;
+      for (let i = 0; i < 65; i += 1) {
+        api.setPlayerInput('p1', { moveX: 1, moveZ: 0, dropBubble: false, useItem: false });
+        const st = api.stepFrames(1, { respectHitStop: true });
+        if (st.lastHitStopSec >= 0.105) {
+          koState = st;
+          break;
+        }
+      }
+      clearInput('p1');
+      const tickAtKo = koState.sim.tick;
+      const stFreeze2 = api.stepFrames(3, { respectHitStop: true });
+      const tickDuringKoFreeze = stFreeze2.sim.tick;
+
+      return {
+        trapHitStopSec,
+        tickAtTrap,
+        tickDuringTrapFreeze,
+        koHitStopSec: koState ? koState.lastHitStopSec : 0,
+        tickAtKo,
+        tickDuringKoFreeze,
+      };
+      """
+  )
+  assert abs(res["trapHitStopSec"] - 0.07) < 1e-3, res
+  assert res["tickDuringTrapFreeze"] == res["tickAtTrap"], res
+  assert abs(res["koHitStopSec"] - 0.11) < 1e-3, res
+  assert res["tickDuringKoFreeze"] == res["tickAtKo"], res
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_32_bot_ai_difficulty_tiers_and_ally_2s_rescue_priority(
+    h: QQTangTestHarness,
+) -> None:
+  _ensure_loaded(h)
+  # Verify Select screen difficulty toggle button and localStorage persistence
+  h.eval_js("window.localStorage.removeItem('qq_tang_difficulty')")
+  h.navigate(wait_qqtang=True)
+  h.click_testid("btn-play")
+  toggle_rect = h.get_testid_rect("btn-toggle-difficulty")
+  assert toggle_rect is not None and toggle_rect["visible"] is True, toggle_rect
+  assert toggle_rect["height"] >= 67.5, toggle_rect
+  diff0 = h.eval_js(
+      "({ cfg: (window.__QQTANG__ || window.__QQ_TANG__).getState().selectedConfig.difficulty,"
+      " ls: window.localStorage.getItem('qq_tang_difficulty'),"
+      " txt: document.querySelector('[data-testid=\"btn-toggle-difficulty\"]').textContent })"
+  )
+  assert diff0["cfg"] == "easy" and diff0["ls"] == "easy" and "简单" in diff0["txt"], diff0
+  h.click_testid("btn-toggle-difficulty")
+  diff1 = h.eval_js(
+      "({ cfg: (window.__QQTANG__ || window.__QQ_TANG__).getState().selectedConfig.difficulty,"
+      " ls: window.localStorage.getItem('qq_tang_difficulty'),"
+      " txt: document.querySelector('[data-testid=\"btn-toggle-difficulty\"]').textContent })"
+  )
+  assert diff1["cfg"] == "normal" and diff1["ls"] == "normal" and "普通" in diff1["txt"], diff1
+
+  res = h.run_sim_js(
+      """
+      const sEasy = api.startMatch({
+        deterministic: true,
+        difficulty: 'easy',
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        seed: 5032,
+        botBehavior: 'active',
+      });
+      const diffEasy = sEasy.sim.difficulty;
+
+      // Verify teammate bot1 rescues trapped p1 within <= 2.0s (120 frames) after blast clears!
+      // Enclose enemies at far corners so bot1 stays on the West side until p1's bubble traps p1.
+      api.startMatch({
+        deterministic: true,
+        difficulty: 'normal',
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        seed: 5032,
+        botBehavior: 'active',
+        customGrid: makeGrid({
+          walls: [
+            [3, 5], [3, 7], [4, 5], [4, 7],
+            [12, 1], [13, 2], [12, 11], [13, 10],
+          ],
+        }),
+        customSpawns: [
+          { id: 'p1', col: 6, row: 6, team: 0 },
+          { id: 'bot1', col: 2, row: 6, team: 0 },
+          { id: 'bot2', col: 13, row: 1, team: 1 },
+          { id: 'bot3', col: 13, row: 11, team: 1 },
+        ],
+      });
+      pulseDropBubble('p1');
+      let st = api.stepFrames(160); // 156f fuse -> p1 is now trapped at (6, 6)!
+      const hintEl = document.querySelector('[data-testid="hud-trapped-hint"]');
+      const ringEl = document.querySelector('[data-testid="hud-trapped-ring"]');
+      const hintVis0 = Boolean(hintEl && hintEl.getBoundingClientRect().height > 0);
+      const hintTxt = hintEl ? hintEl.textContent : '';
+      const ringVis0 = Boolean(ringEl && ringEl.getBoundingClientRect().width > 0);
+      const ringW0 = ringEl ? ringEl.getBoundingClientRect().width : 0;
+
+      st = api.stepFrames(25); // 185f total: blast linger clears, ring has shrunk!
+      const ringW1 = ringEl ? ringEl.getBoundingClientRect().width : 0;
+      const clearedAt = st.sim.tick;
+      let rescuedAt = -1;
+      for (let i = 0; i < 120; i += 1) {
+        st = api.stepFrames(1);
+        if (getPlayer(st, 'p1').state === 'alive') {
+          rescuedAt = st.sim.tick;
+          break;
+        }
+      }
+      return {
+        diffEasy,
+        diffNormal: st.sim.difficulty,
+        hintVis0,
+        hintTxt,
+        ringVis0,
+        ringW0,
+        ringW1,
+        rescueTicks: rescuedAt > 0 ? rescuedAt - clearedAt : 999,
+        bot1Rescues: getPlayer(st, 'bot1').stats.rescues,
+      };
+      """
+  )
+  assert res["diffEasy"] == "easy" and res["diffNormal"] == "normal", res
+  assert res["hintVis0"] is True and "被困住了! 队友来救 / 🪡 用针" in res["hintTxt"], res
+  assert res["ringVis0"] is True and res["ringW0"] > res["ringW1"] > 20, res
+  assert res["rescueTicks"] <= 120 and res["bot1Rescues"] >= 1, res
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_33_follow_camera_on_844x390_and_90pct_arena_fill_on_1280x800_and_1024x768(
+    h: QQTangTestHarness,
+) -> None:
+  h.set_viewport(1280, 800, mobile=False, touch=False)
+  h.navigate(wait_qqtang=True)
+  st_1280 = h.run_sim_js(
+      """
+      return api.startMatch({
+        deterministic: true,
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        seed: 5033,
+        botBehavior: 'idle',
+      });
+      """
+  )
+  assert st_1280["render"]["followCameraActive"] is False, st_1280["render"]
+  assert st_1280["render"]["arenaFillRatioW"] >= 0.90, st_1280["render"]
+
+  h.set_viewport(1024, 768, mobile=True, touch=True)
+  st_1024 = h.eval_js("(window.__QQTANG__ || window.__QQ_TANG__).stepFrames(2)")
+  assert st_1024["render"]["followCameraActive"] is False, st_1024["render"]
+  assert st_1024["render"]["arenaFillRatioW"] >= 0.90, st_1024["render"]
+
+  h.set_viewport(844, 390, mobile=True, touch=True)
+  follow_res = h.run_sim_js(
+      """
+      api.startMatch({
+        deterministic: true,
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'wanzi',
+        seed: 5033,
+        botBehavior: 'idle',
+        customGrid: makeGrid(),
+        customSpawns: [
+          { id: 'p1', col: 3, row: 6, team: 0 },
+          { id: 'bot1', col: 1, row: 11, team: 0 },
+          { id: 'bot2', col: 13, row: 1, team: 1 },
+          { id: 'bot3', col: 13, row: 11, team: 1 },
+        ],
+      });
+      const st0 = api.stepFrames(5);
+      const x0 = st0.render.followTargetX;
+      moveHold('p1', 1, 0, 60);
+      const st1 = api.stepFrames(10);
+      const x1 = st1.render.followTargetX;
+      return {
+        followActive: st1.render.followCameraActive,
+        visibleTileWidth: st1.render.visibleTileWidth,
+        x0,
+        x1,
+        p1X: getPlayer(st1, 'p1').x,
+      };
+      """
+  )
+  assert follow_res["followActive"] is True, follow_res
+  assert follow_res["visibleTileWidth"] >= 10.0, follow_res
+  assert follow_res["x1"] > follow_res["x0"] + 1.5, follow_res
+  h.set_viewport(1280, 800, mobile=False, touch=False)
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_34_quick_start_button_and_321_go_countdown_sim_freeze(
+    h: QQTangTestHarness,
+) -> None:
+  h.set_viewport(1280, 800, mobile=False, touch=False)
+  h.navigate(wait_qqtang=True)
+  qs_rect = h.get_testid_rect("btn-quick-start")
+  assert qs_rect is not None and qs_rect["visible"] is True, qs_rect
+  assert qs_rect["width"] >= 68 and qs_rect["height"] >= 68, qs_rect
+
+  h.click_testid("btn-quick-start")
+  res = h.run_sim_js(
+      """
+      api.setDeterministicMode(true);
+      const st0 = api.getState();
+      const cdEl = document.querySelector('[data-testid="hud-countdown"]');
+      const markerEl = document.querySelector('[data-testid="hud-p1-marker"]');
+      const markerRect0 = markerEl ? markerEl.getBoundingClientRect() : null;
+      const markerText0 = markerEl ? markerEl.textContent : '';
+      const text0 = cdEl ? cdEl.textContent : '';
+      const stMid = api.stepFrames(45);
+      const textMid = cdEl ? cdEl.textContent : '';
+      const stAfter = api.stepFrames(60);
+      // Verify marker stays visible up to 5.0s (300 ticks) and hides after 5.0s!
+      const stAt4s = api.stepFrames(230); // ~245 ticks (~4.08s)
+      const markerVisAt4s = Boolean(markerEl && !markerEl.hidden && markerEl.getBoundingClientRect().height >= 48);
+      const stAt52s = api.stepFrames(75); // ~320 ticks (~5.33s)
+      const markerVisAt52s = Boolean(markerEl && !markerEl.hidden);
+      return {
+        uiScreen: st0.uiScreen,
+        cfg: st0.selectedConfig,
+        simDiff: st0.sim.difficulty,
+        cd0: st0.countdownRemainingSec,
+        tick0: st0.sim.tick,
+        text0,
+        markerH: markerRect0 ? markerRect0.height : 0,
+        markerW: markerRect0 ? markerRect0.width : 0,
+        markerText0,
+        markerVisAt4s,
+        markerVisAt52s,
+        cdMid: stMid.countdownRemainingSec,
+        tickMid: stMid.sim.tick,
+        textMid,
+        cdAfter: stAfter.countdownRemainingSec,
+        tickAfter: stAfter.sim.tick,
+      };
+      """
+  )
+  assert res["uiScreen"] == "playing", res
+  assert res["cfg"]["modeId"] == "classic_2v2" and res["cfg"]["arenaId"] == "candy_town", res
+  assert res["cfg"]["p1CharacterId"] == "miduo", res
+  assert res["cfg"]["difficulty"] == "easy" and res["simDiff"] == "easy", res
+  assert res["markerH"] >= 48 and "你 · 米多" in res["markerText0"], res
+  assert res["markerVisAt4s"] is True and res["markerVisAt52s"] is False, res
+  assert res["cd0"] >= 1.15 and res["tick0"] == 0, res
+  assert "3" in res["text0"] and "WASD/摇杆" in res["text0"], res
+  assert res["tickMid"] == 0 and ("2" in res["textMid"] or "1" in res["textMid"]), res
+  assert res["cdAfter"] == 0 and res["tickAfter"] > 0, res
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_35_boss_golem_24hp_human_2x_damage_vs_bot_1x_damage_and_4_shared_lives(
+    h: QQTangTestHarness,
+) -> None:
+  _ensure_loaded(h)
+  res = h.run_sim_js(
+      """
+      const s0 = api.startMatch({
+        deterministic: true,
+        modeId: 'boss_golem',
+        arenaId: 'candy_town',
+        p1CharacterId: 'haiwangzi',
+        seed: 5035,
+        botBehavior: 'idle',
+        customGrid: makeGrid(),
+        customSpawns: [
+          { id: 'p1', col: 5, row: 5, team: 0 },
+          { id: 'bot1', col: 7, row: 7, team: 0 },
+          { id: 'bot2', col: 1, row: 11, team: 0 },
+          { id: 'bot3', col: 13, row: 11, team: 0 },
+        ],
+        startingLoadout: {
+          p1: { blastRange: 4 },
+          bot1: { blastRange: 4 },
+        },
+      });
+      const maxHp = s0.sim.boss.maxHp;
+      const startLives = s0.sim.teamLives;
+
+      // 1. Human p1 hits Boss -> deals 2 damage (24 -> 22) and spawns "2×!" popup!
+      pulseDropBubble('p1');
+      moveHold('p1', -1, 0, 20);
+      moveHold('p1', 0, -1, 20);
+      const stHumanHit = api.stepFrames(120);
+      const hpAfterHuman = stHumanHit.sim.boss.hp;
+      const popupsAfterHuman = stHumanHit.activePopups.map((p) => p.text);
+
+      // Wait out Boss hit i-frame (0.35s = 22f) + blast linger
+      api.stepFrames(40);
+
+      // 2. Bot bot1 at (7, 7) hits Boss North -> deals 1 damage (22 -> 21)!
+      pulseDropBubble('bot1');
+      moveHold('bot1', 1, 0, 20);
+      moveHold('bot1', 0, 1, 20);
+      const stBotHit = api.stepFrames(120);
+      const hpAfterBot = stBotHit.sim.boss.hp;
+
+      return {
+        maxHp,
+        startLives,
+        hpAfterHuman,
+        popupsAfterHuman,
+        hpAfterBot,
+      };
+      """
+  )
+  assert res["maxHp"] == 24 and res["startLives"] == 4, res
+  assert res["hpAfterHuman"] == 22, res
+  assert "2×!" in res["popupsAfterHuman"], res
+  assert res["hpAfterBot"] == 21, res
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_36_floating_combat_popups_ko_rescue_plus1_and_chain(
+    h: QQTangTestHarness,
+) -> None:
+  _ensure_loaded(h)
+  res = h.run_sim_js(
+      """
+      api.startMatch({
+        deterministic: true,
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'xiaoqiang',
+        seed: 5036,
+        botBehavior: 'idle',
+        customGrid: makeGrid(),
+        customSpawns: [
+          { id: 'p1', col: 4, row: 6, team: 0 },
+          { id: 'bot1', col: 7, row: 6, team: 0 },
+          { id: 'bot2', col: 8, row: 6, team: 1 },
+          { id: 'bot3', col: 13, row: 11, team: 1 },
+        ],
+        customPickups: [
+          { type: 'speed', col: 5, row: 6 },
+        ],
+        startingLoadout: {
+          p1: { maxBubbles: 3, blastRange: 3 },
+        },
+      });
+      const seenTexts = new Set();
+      const recordPopups = (st) => {
+        for (const p of st.activePopups || []) {
+          seenTexts.add(p.text);
+        }
+      };
+
+      // 1. Drop bubble at (4, 6), walk East onto (5, 6) to collect speed pickup ("+1") and drop 2nd bubble for 2-chain ("连爆×2!")
+      pulseDropBubble('p1');
+      let st = moveHold('p1', 1, 0, 18);
+      recordPopups(st);
+      pulseDropBubble('p1');
+      moveHold('p1', -1, 0, 28);
+      moveHold('p1', 0, -1, 20);
+
+      // Step until 2-bubble chain explodes and traps bot1 (7, 6) and bot2 (8, 6)!
+      for (let i = 0; i < 120; i += 1) {
+        st = api.stepFrames(1);
+        recordPopups(st);
+      }
+
+      // Walk p1 across (7, 6) to rescue ally bot1 ("救援!") and across (8, 6) to KO enemy bot2 ("KO!")
+      steerToWorld('p1', 'p1', 7.5, 6.5, 50, 0.08);
+      recordPopups(api.getState());
+      steerToWorld('p1', 'p1', 8.5, 6.5, 35, 0.08);
+      recordPopups(api.getState());
+
+      return Array.from(seenTexts);
+      """
+  )
+  assert "+1" in res, res
+  assert any(t.startswith("连爆×") for t in res), res
+  assert "救援!" in res, res
+  assert "KO!" in res, res
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_37_hud_strictly_le_5_clickable_controls_and_68px_touch_targets_all_4_viewports(
+    h: QQTangTestHarness,
+) -> None:
+  viewports = [
+      (1280, 800, False, False),
+      (1024, 768, True, True),
+      (844, 390, True, True),
+      (390, 844, True, True),
+  ]
+  for w, ht, mob, tch in viewports:
+    h.set_viewport(w, ht, mobile=mob, touch=tch)
+    st = h.run_sim_js(
+        """
+        api.startMatch({
+          deterministic: true,
+          modeId: 'classic_2v2',
+          arenaId: 'candy_town',
+          p1CharacterId: 'miduo',
+          seed: 5037,
+          botBehavior: 'idle',
+        });
+        return api.stepFrames(5);
+        """
+    )
+    audit = h.audit_viewport_and_hud()
+    assert st["hudClickableCount"] <= 5 and audit["controlCount"] <= 5, (w, ht, st["hudClickableCount"], audit)
+    assert audit["scrollWidth"] <= w and audit["scrollHeight"] <= ht, (w, ht, audit)
+    assert audit["overlaps"] == [], (w, ht, audit)
+    for ctrl in audit["controls"]:
+      assert ctrl["width"] >= 67.5 and ctrl["height"] >= 67.5, (
+          f"Control < 68px on {w}x{ht}: {ctrl}"
+      )
+  h.set_viewport(1280, 800, mobile=False, touch=False)
+
+
+@_t5("5E_fun_overhaul_mechanics")
+def test_t5_38_hall_of_fame_local_storage_merge_preserves_sibling_games(
+    h: QQTangTestHarness,
+) -> None:
+  _ensure_loaded(h)
+  res = h.run_sim_js(
+      """
+      window.localStorage.setItem(
+        'qq_hall_progress',
+        JSON.stringify({
+          aeroplane: { plays: 4, best: 620, stars: 3, last: 1700000000000 },
+        })
+      );
+      api.startMatch({
+        deterministic: true,
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        seed: 5038,
+        botBehavior: 'idle',
+        matchDurationSec: 0.5,
+      });
+      api.stepFrames(40);
+      return JSON.parse(window.localStorage.getItem('qq_hall_progress') || '{}');
+      """
+  )
+  assert res.get("aeroplane") == {"plays": 4, "best": 620, "stars": 3, "last": 1700000000000}, res
+  tang = res.get("tang")
+  assert isinstance(tang, dict), res
+  assert tang.get("plays", 0) >= 1 and tang.get("best", 0) > 0, tang
+  assert 1 <= tang.get("stars", 0) <= 3 and tang.get("last", 0) > 0, tang
+
 

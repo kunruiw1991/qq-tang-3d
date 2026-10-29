@@ -233,88 +233,78 @@ function buildCandySoftBlock(variant = 0) {
 
 function buildPirateHardWall(variant = 0, col = 0, row = 0) {
   const g = new THREE.Group();
-  if (row === 3 || row === 9 || variant % 2 === 0) {
-    // Cast-iron Naval Cannon on oak carriage!
-    const carriage = new THREE.Mesh(
-      new THREE.BoxGeometry(0.76, 0.32, 0.62),
-      createCandyMaterial(0x8b4513, { roughness: 0.48, clearcoat: 0.2 })
-    );
-    carriage.position.y = 0.20;
-    g.add(carriage);
+  // Dark gunmetal / obsidian-iron Naval Cannon on dark stone plinth (unmistakably distinct from turquoise-gold soft crates!)
+  const plinth = new THREE.Mesh(
+    new THREE.BoxGeometry(0.84, 0.28, 0.72),
+    createCandyMaterial(0x1e293b, { roughness: 0.36, clearcoat: 0.45 })
+  );
+  plinth.position.y = 0.14;
+  g.add(plinth);
 
-    // 4 brass wheels
-    const wheelGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.08, 12);
-    wheelGeo.rotateX(Math.PI * 0.5);
-    const brassMat = createMetallicMaterial(0xd97706, { roughness: 0.3, metalness: 0.8 });
-    for (const [wx, wz] of [
-      [-0.24, -0.32],
-      [0.24, -0.32],
-      [-0.24, 0.32],
-      [0.24, 0.32],
-    ]) {
-      const w = new THREE.Mesh(wheelGeo, brassMat);
-      w.position.set(wx, 0.13, wz);
-      g.add(w);
-    }
-
-    // Iron cannon barrel + brass muzzle ring
-    const ironMat = createMetallicMaterial(0x334155, { roughness: 0.34, metalness: 0.82 });
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.23, 0.86, 16), ironMat);
-    barrel.rotation.z = Math.PI * 0.5;
-    barrel.position.set(0, 0.48, 0);
-    g.add(barrel);
-
-    const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.165, 0.035, 8, 16), brassMat);
-    muzzle.rotation.y = Math.PI * 0.5;
-    muzzle.position.set(0.41, 0.48, 0);
-    g.add(muzzle);
-
-    const breech = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), brassMat);
-    breech.position.set(-0.44, 0.48, 0);
-    g.add(breech);
-
-    if (col > 7) g.rotation.y = Math.PI;
-    return enableShadows(g);
+  // 4 brass wheels
+  const wheelGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.08, 12);
+  wheelGeo.rotateX(Math.PI * 0.5);
+  const brassMat = createMetallicMaterial(0xd97706, { roughness: 0.3, metalness: 0.8 });
+  for (const [wx, wz] of [
+    [-0.24, -0.34],
+    [0.24, -0.34],
+    [-0.24, 0.34],
+    [0.24, 0.34],
+  ]) {
+    const w = new THREE.Mesh(wheelGeo, brassMat);
+    w.position.set(wx, 0.13, wz);
+    g.add(w);
   }
 
-  // Iron-hooped Oak Rum Barrel + Brass Anchor emblem
-  const barrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.36, 0.38, 0.88, 16),
-    createCandyMaterial(0x9a5822, { roughness: 0.42, clearcoat: 0.3 })
-  );
-  barrel.position.y = 0.44;
+  // Dark gunmetal iron cannon barrel + crimson-brass muzzle ring
+  const ironMat = createMetallicMaterial(0x0f172a, { roughness: 0.28, metalness: 0.88 });
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 0.88, 16), ironMat);
+  barrel.rotation.z = Math.PI * 0.5;
+  barrel.position.set(0, 0.52, 0);
   g.add(barrel);
 
-  const hoopMat = createMetallicMaterial(0x374151, { roughness: 0.32, metalness: 0.85 });
-  for (const hy of [0.22, 0.66]) {
-    const hoop = new THREE.Mesh(new THREE.CylinderGeometry(0.395, 0.395, 0.08, 16), hoopMat);
-    hoop.position.y = hy;
-    g.add(hoop);
-  }
+  const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.04, 8, 16), brassMat);
+  muzzle.rotation.y = Math.PI * 0.5;
+  muzzle.position.set(0.42, 0.52, 0);
+  g.add(muzzle);
 
-  const cap = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.28, 0.28, 0.06, 14),
-    createMetallicMaterial(0xf59e0b, { roughness: 0.25, metalness: 0.85 })
-  );
-  cap.position.y = 0.90;
-  g.add(cap);
+  const breech = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), brassMat);
+  breech.position.set(-0.45, 0.52, 0);
+  g.add(breech);
+
+  if (col > 7 || (variant & 1) === 1) g.rotation.y = Math.PI;
   return enableShadows(g);
 }
 
 function buildPirateSoftBlock() {
   const g = new THREE.Group();
-  const crateTex = createWoodCrateTexture();
+  // Bright Turquoise & Gold Striped Pirate Treasure Parcel (100% distinct from dark gunmetal iron cannons!)
+  const parcelTex = createGiftBoxTexture('#06B6D4', '#FBBF24');
   const box = new THREE.Mesh(
-    new THREE.BoxGeometry(0.86, 0.80, 0.86),
-    new THREE.MeshStandardMaterial({
-      map: crateTex,
-      roughness: 0.46,
-      metalness: 0.08,
+    new THREE.BoxGeometry(0.86, 0.76, 0.86),
+    new THREE.MeshPhysicalMaterial({
+      map: parcelTex,
+      roughness: 0.22,
+      clearcoat: 0.82,
       transparent: false,
     })
   );
-  box.position.y = 0.40;
+  box.position.y = 0.38;
   g.add(box);
+
+  // Golden treasure seal gem on top
+  const seal = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.24, 0.08, 12),
+    createCandyMaterial(0xfacc15, {
+      roughness: 0.16,
+      clearcoat: 0.92,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.28,
+    })
+  );
+  seal.position.y = 0.79;
+  seal.userData.noCastShadow = true;
+  g.add(seal);
   return enableShadows(g);
 }
 
@@ -960,29 +950,29 @@ export class ArenaStageManager {
     if (arenaId === 'pirate_bay') {
       matA = markShared(
         new THREE.MeshStandardMaterial({
-          map: createDeckPlankTexture('#DDA36A'),
-          roughness: 0.48,
+          map: createDeckPlankTexture('#F3C88E'),
+          roughness: 0.46,
           metalness: 0.05,
           transparent: false,
         })
       );
       matB = markShared(
         new THREE.MeshStandardMaterial({
-          map: createDeckPlankTexture('#C68B52'),
+          map: createDeckPlankTexture('#8E511D'),
           roughness: 0.50,
           metalness: 0.05,
           transparent: false,
         })
       );
     } else if (arenaId === 'ice_village') {
-      matA = markShared(createCandyMaterial(0xf0f9ff, { roughness: 0.14, clearcoat: 0.85 }));
-      matB = markShared(createCandyMaterial(0x93c5fd, { roughness: 0.12, clearcoat: 0.90 }));
+      matA = markShared(createCandyMaterial(0xffffff, { roughness: 0.14, clearcoat: 0.85 }));
+      matB = markShared(createCandyMaterial(0x60a5fa, { roughness: 0.12, clearcoat: 0.90 }));
     } else if (arenaId === 'toy_kingdom') {
-      matA = markShared(createCandyMaterial(0xfef9c3, { roughness: 0.24, clearcoat: 0.65 }));
-      matB = markShared(createCandyMaterial(0xfde047, { roughness: 0.24, clearcoat: 0.65 }));
+      matA = markShared(createCandyMaterial(0xfefce8, { roughness: 0.24, clearcoat: 0.65 }));
+      matB = markShared(createCandyMaterial(0xfacc15, { roughness: 0.22, clearcoat: 0.68 }));
     } else {
-      matA = markShared(createCandyMaterial(0xfff7ed, { roughness: 0.26, clearcoat: 0.55 }));
-      matB = markShared(createCandyMaterial(0xf9a8d4, { roughness: 0.24, clearcoat: 0.60 }));
+      matA = markShared(createCandyMaterial(0xfffbeb, { roughness: 0.24, clearcoat: 0.58 }));
+      matB = markShared(createCandyMaterial(0xf472b6, { roughness: 0.22, clearcoat: 0.65 }));
     }
     const pair = { matA, matB };
     this._floorMaterialsByArena.set(arenaId, pair);
@@ -1234,8 +1224,8 @@ export class ArenaStageManager {
     };
     const palette = colorMap[arenaId] || colorMap.candy_town;
 
-    for (let i = 0; i < 6; i += 1) {
-      const ang = (i / 6) * Math.PI * 2 + 0.35;
+    for (let i = 0; i < 8; i += 1) {
+      const ang = (i / 8) * Math.PI * 2 + 0.35;
       const mat = createCandyMaterial(palette[i % palette.length], { clearcoat: 0.7 });
       const mesh = new THREE.Mesh(this._fragGeo, mat);
       mesh.position.set(wx + Math.cos(ang) * 0.16, 0.38, wz + Math.sin(ang) * 0.16);
@@ -1243,11 +1233,11 @@ export class ArenaStageManager {
       this.debrisFragments.push({
         mesh,
         mat,
-        vx: Math.cos(ang) * 2.1,
-        vy: 3.4 + (i % 3) * 0.6,
-        vz: Math.sin(ang) * 2.1,
+        vx: Math.cos(ang) * 2.3,
+        vy: 3.6 + (i % 3) * 0.65,
+        vz: Math.sin(ang) * 2.3,
         age: 0,
-        life: 0.48,
+        life: 0.52,
       });
     }
   }

@@ -257,6 +257,7 @@ function buildSkyBombTelegraph(sim, boss) {
     });
   }
 
+  const armSteps = boss.phase === 2 ? 2 : 1;
   const warning = [];
   for (let i = 0; i < targets.length; i += 1) {
     const { col, row } = targets[i];
@@ -267,10 +268,12 @@ function buildSkyBombTelegraph(sim, boss) {
     }
     warning.push({ col, row });
     for (let di = 0; di < CARDINAL_DIRS.length; di += 1) {
-      const nc = col + CARDINAL_DIRS[di].dc;
-      const nr = row + CARDINAL_DIRS[di].dr;
-      if (!isInBounds(nc, nr) || sim.grid[nr][nc] === TILE_TYPE.HARD_WALL) continue;
-      warning.push({ col: nc, row: nr });
+      for (let s = 1; s <= armSteps; s += 1) {
+        const nc = col + CARDINAL_DIRS[di].dc * s;
+        const nr = row + CARDINAL_DIRS[di].dr * s;
+        if (!isInBounds(nc, nr) || sim.grid[nr][nc] === TILE_TYPE.HARD_WALL) break;
+        warning.push({ col: nc, row: nr });
+      }
     }
   }
   return dedupeTiles(warning);
@@ -282,24 +285,37 @@ function buildSteamShockwaveTelegraph(sim, boss) {
   const bc = boss.col;
   const br = boss.row;
 
-  // Emit 2-tile-wide cardinal steam lanes from all 4 faces of the 2x2 Golem
+  // Phase 1 emits 2-tile-wide cardinal steam lanes; Phase 2 widens attacks by 2 tiles (4-tile-wide lanes)
   const rayOrigins = [
-    // North from (bc, br) and (bc+1, br)
+    // North
     { c: bc, r: br, dc: 0, dr: -1 },
     { c: bc + 1, r: br, dc: 0, dr: -1 },
-    // South from (bc, br+1) and (bc+1, br+1)
+    // South
     { c: bc, r: br + 1, dc: 0, dr: 1 },
     { c: bc + 1, r: br + 1, dc: 0, dr: 1 },
-    // West from (bc, br) and (bc, br+1)
+    // West
     { c: bc, r: br, dc: -1, dr: 0 },
     { c: bc, r: br + 1, dc: -1, dr: 0 },
-    // East from (bc+1, br) and (bc+1, br+1)
+    // East
     { c: bc + 1, r: br, dc: 1, dr: 0 },
     { c: bc + 1, r: br + 1, dc: 1, dr: 0 },
   ];
+  if (boss.phase === 2) {
+    rayOrigins.push(
+      { c: bc - 1, r: br, dc: 0, dr: -1 },
+      { c: bc + 2, r: br, dc: 0, dr: -1 },
+      { c: bc - 1, r: br + 1, dc: 0, dr: 1 },
+      { c: bc + 2, r: br + 1, dc: 0, dr: 1 },
+      { c: bc, r: br - 1, dc: -1, dr: 0 },
+      { c: bc, r: br + 2, dc: -1, dr: 0 },
+      { c: bc + 1, r: br - 1, dc: 1, dr: 0 },
+      { c: bc + 1, r: br + 2, dc: 1, dr: 0 }
+    );
+  }
 
   for (let i = 0; i < rayOrigins.length; i += 1) {
     const orig = rayOrigins[i];
+    if (!isInBounds(orig.c, orig.r)) continue;
     for (let step = 1; step <= range; step += 1) {
       const tc = orig.c + orig.dc * step;
       const tr = orig.r + orig.dr * step;
@@ -475,7 +491,8 @@ export function stepBossAI(sim, dt) {
   // Patrol state (shows 'hurt' briefly if damaged without interrupting cooldown)
   boss.state = boss._hurtFlashSec > 0 ? 'hurt' : 'patrol';
 
-  const moveSpeed = boss.phase === 2 ? 2.1 : 1.5;
+  // Phase 2 patrol speed is x1.3 of Phase 1 (1.5 * 1.3 = 1.95)
+  const moveSpeed = boss.phase === 2 ? 1.95 : 1.5;
   boss._patrolTimer -= dt;
   if (boss._patrolTimer <= 0) {
     boss._patrolTimer = sim.rng.rangeFloat(1.6, 2.8);

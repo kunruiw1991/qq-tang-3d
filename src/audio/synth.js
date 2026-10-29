@@ -109,6 +109,7 @@ export class AudioSynth {
     this._currentTrack = 'menu';
     this._sfxCount = 0;
     this._bgmStepCount = 0;
+    this._candyRainRumbleCount = 0;
 
     this._stepIndex = 0;
     this._seqTimer = null;
@@ -367,6 +368,9 @@ export class AudioSynth {
       if (RECOGNIZED_SFX_EVENTS.has(ev.type)) {
         this._sfxCount += 1;
       }
+      if (ev.type === EVENT_TYPES.CANDY_RAIN_WARNING) {
+        this._candyRainRumbleCount += 1;
+      }
       if (!playedThisBatch.has(ev.type)) {
         playedThisBatch.add(ev.type);
         this._triggerEventSfx(ev);
@@ -384,6 +388,44 @@ export class AudioSynth {
       duration: 0.065,
       dest: this._sfxGain,
     });
+  }
+
+  playFuseTick(urgency = 0.5) {
+    this._sfxCount += 1;
+    if (!this._canSynthesizeNow()) return;
+    const baseFreq = 820 + Math.max(0, Math.min(1, urgency)) * 520;
+    this._playTone({
+      freqStart: baseFreq,
+      freqEnd: baseFreq * 1.18,
+      type: 'square',
+      gain: 0.11,
+      duration: 0.042,
+      dest: this._sfxGain,
+    });
+  }
+
+  playCountdownBeep(isGo = false) {
+    this._sfxCount += 1;
+    if (!this._canSynthesizeNow()) return;
+    if (isGo) {
+      this._playTone({
+        freqStart: 783.99,
+        freqEnd: 1046.5,
+        type: 'triangle',
+        gain: 0.20,
+        duration: 0.18,
+        dest: this._sfxGain,
+      });
+    } else {
+      this._playTone({
+        freqStart: 523.25,
+        freqEnd: 523.25,
+        type: 'triangle',
+        gain: 0.15,
+        duration: 0.09,
+        dest: this._sfxGain,
+      });
+    }
   }
 
   _triggerEventSfx(ev) {
@@ -438,23 +480,25 @@ export class AudioSynth {
         });
         break;
 
-      case EVENT_TYPES.CHAIN_EXPLODE:
+      case EVENT_TYPES.CHAIN_EXPLODE: {
+        const chainMult = Math.pow(1.12, Math.min(6, Math.max(1, (ev.chainCount || 2) - 1)));
         this._playNoiseBurst({
           duration: 0.22,
           gain: 0.24,
           filterType: 'bandpass',
-          filterFreq: 1950,
+          filterFreq: 1950 * Math.min(1.5, chainMult),
           startTime: now,
         });
         this._playTone({
-          freqStart: 523.25,
-          freqEnd: 783.99,
+          freqStart: 523.25 * chainMult,
+          freqEnd: 783.99 * chainMult,
           type: 'triangle',
-          gain: 0.16,
+          gain: 0.18,
           duration: 0.16,
           startTime: now,
         });
         break;
+      }
 
       case EVENT_TYPES.BLOCK_BREAK:
         this._playTone({
@@ -584,21 +628,26 @@ export class AudioSynth {
 
       case EVENT_TYPES.PICKUP:
       case EVENT_TYPES.BUN_PICKUP:
-        this._playTone({
-          freqStart: 783.99,
-          freqEnd: 783.99,
-          type: 'triangle',
-          gain: 0.16,
-          duration: 0.065,
-          startTime: now,
+        [659.25, 880.0, 1174.66].forEach((f, idx) => {
+          this._playTone({
+            freqStart: f,
+            freqEnd: f * 1.12,
+            type: 'triangle',
+            gain: 0.16,
+            duration: 0.065,
+            startTime: now + idx * 0.042,
+          });
         });
+        break;
+
+      case EVENT_TYPES.CANDY_RAIN_DROP:
         this._playTone({
-          freqStart: 1174.66,
-          freqEnd: 1174.66,
+          freqStart: 220,
+          freqEnd: 75,
           type: 'triangle',
           gain: 0.18,
-          duration: 0.11,
-          startTime: now + 0.055,
+          duration: 0.12,
+          startTime: now,
         });
         break;
 
@@ -657,11 +706,65 @@ export class AudioSynth {
 
       case EVENT_TYPES.BOSS_HIT:
         this._playTone({
-          freqStart: 880,
-          freqEnd: 290,
+          freqStart: ev.isHumanHit ? 1046.5 : 880,
+          freqEnd: 320,
           type: 'square',
-          gain: 0.15,
-          duration: 0.13,
+          gain: ev.isHumanHit ? 0.20 : 0.15,
+          duration: 0.14,
+          startTime: now,
+        });
+        if (ev.isHumanHit) {
+          this._playTone({
+            freqStart: 659.25,
+            freqEnd: 1318.5,
+            type: 'triangle',
+            gain: 0.18,
+            duration: 0.12,
+            startTime: now + 0.04,
+          });
+        }
+        break;
+
+      case EVENT_TYPES.CANDY_RAIN_WARNING:
+        this._playNoiseBurst({
+          duration: 0.42,
+          gain: 0.24,
+          filterType: 'lowpass',
+          filterFreq: 260,
+          startTime: now,
+        });
+        this._playTone({
+          freqStart: 112,
+          freqEnd: 46,
+          type: 'sawtooth',
+          gain: 0.24,
+          duration: 0.42,
+          startTime: now,
+        });
+        this._playTone({
+          freqStart: 587.33,
+          freqEnd: 440,
+          type: 'triangle',
+          gain: 0.18,
+          duration: 0.22,
+          startTime: now + 0.08,
+        });
+        break;
+
+      case EVENT_TYPES.CANDY_RAIN_DROP:
+        this._playNoiseBurst({
+          duration: 0.12,
+          gain: 0.16,
+          filterType: 'lowpass',
+          filterFreq: 380,
+          startTime: now,
+        });
+        this._playTone({
+          freqStart: 135,
+          freqEnd: 55,
+          type: 'triangle',
+          gain: 0.20,
+          duration: 0.14,
           startTime: now,
         });
         break;
@@ -757,6 +860,7 @@ export class AudioSynth {
       currentTrack: this._currentTrack,
       sfxCount: this._sfxCount,
       bgmStepCount: this._bgmStepCount,
+      candyRainRumbleCount: this._candyRainRumbleCount,
     };
   }
 }

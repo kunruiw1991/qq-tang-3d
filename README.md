@@ -37,6 +37,40 @@ Soft blocks drop 8 authentic *QQ Tang* items & rideable mounts (`0.55s` spawn bl
 
 ---
 
+## Changelog — Fun Overhaul (v1.1)
+
+The first release was technically complete but not fun to play: perfectly danger-forecasting bots
+produced 150-second stalemates with zero KOs (an autopilot-vs-bots classic match ended 0–0 on an
+invisible tiebreak), one death meant spectating for two minutes, the arena filled barely half the
+screen with tiny pastel characters, and explosions were pale translucent tubes. This overhaul changes
+the rules, the bots, the camera and the feedback so a match is loud, short and winnable:
+
+- **Stock-lives classic** — each team shares ❤×3; a KO costs a heart, victims respawn in 2.5 s with 2 s
+  of invulnerability, 0 hearts loses, the timer is 120 s, and the last 30 s bring **糖果雨** (candy rain):
+  indestructible candy blocks spiral in from the outer ring every 0.5 s with a "⚠️ 糖果雨来了!" warning
+  and rumble. Nobody spectates while hearts remain.
+- **Bots that play like people** — enemies re-evaluate at 3–4 Hz with a 0.35–0.6 s reaction delay and a
+  dose of overconfidence, never farm blocks near an enemy and hunt the human; the teammate rescues a
+  trapped P1 within ~2 s. Difficulty toggle (🤖 简单 / 普通) on the select screen, persisted; the first
+  match and ⚡快速开始 default to 简单. Measured over 10 seeds: a normal match now has its first KO
+  inside 30 s in 90 % of games and lasts a median 67 s (was 150 s, 0 KOs); on 简单 an autopilot P1
+  wins 10/10 and an idle P1 survives ~29 s.
+- **Readable arena** — the board fills ≥92 % of the safe width at 52° pitch, characters are 1.35× with
+  contact shadows, bold team rings and a bouncing "你 · 名字 ▼" marker for 5 s; +25 % floor contrast,
+  distinct soft/hard blocks on every arena, a follow-camera (≥10 tiles across) on phone landscape.
+- **Juice** — opaque white-hot blasts with saturated team rings and a scale pop, camera shake
+  0.25/0.40, hit-stop 70/110 ms on trap/KO, floating "KO!" / "救援!" / "连爆×N!" / "2×!" text, block
+  confetti, pickup sparkle, fuse 3.0 → 2.6 s with a red pulse + tick in the last 0.8 s, escalating pitch.
+- **Boss that needs you** — HP 12 → 24, hero hits deal 2× (bots 1×), telegraph 1.0 s, phase 2 at 50 %
+  (faster, wider), shared lives 4; an idle P1 never wins, an autopilot P1 wins in 40–63 s.
+- **Onboarding** — 3-2-1-GO countdown with the control hint, "被困住了! 队友来救 / 🪡 用针" hint with a
+  shrinking ring when trapped, a title ⚡快速开始 button, podium hearts/KOs as big icons.
+- Writes `localStorage['qq_hall_progress'].tang` for the QQ Game Hall 3D progress badges.
+- E2E suite grown to 193 tests (stock lives, respawn, candy rain, hit-stop, difficulty, follow-cam,
+  countdown, boss hero damage, HUD ≤5 controls, 4-viewport zero-scroll).
+
+---
+
 ## Classic Playable Cast, Arenas & Modes
 
 ### 4 Playable Chibi 3D Characters

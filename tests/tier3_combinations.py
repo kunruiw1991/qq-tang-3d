@@ -854,8 +854,8 @@ def test_t3_13_boss_golem_phase1_to_phase2_transition_at_half_hp(
       };
       """
   )
-  assert res["startHp"] == 12 and res["startPhase"] == 1, res
-  assert res["midHp"] <= 6 and res["midPhase"] == 2, res
+  assert res["startHp"] == 24 and res["startPhase"] == 1, res
+  assert res["midHp"] <= 12 and res["midPhase"] == 2, res
   assert res["p1State"] == "alive", res
 
 
@@ -908,7 +908,7 @@ def test_t3_14_boss_golem_periodic_powerup_drops_every_three_hp_lost(
       };
       """
   )
-  assert res["bossHp"] == 9, res
+  assert res["bossHp"] == 18, res
   assert res["pickupCount"] >= 2, res
 
 
@@ -1060,7 +1060,7 @@ def test_t3_16_boss_golem_phase2_unlocks_gear_crate_drop_attack(
       return { idleReducedHp: st.sim.boss.hp, sawPhase2, sawGearCrate };
       """
   )
-  assert res["idleReducedHp"] <= 6, res
+  assert res["idleReducedHp"] <= 12, res
   assert res["sawPhase2"] is True, res
   assert res["sawGearCrate"] is True, res
 
@@ -1110,10 +1110,10 @@ def test_t3_17_boss_golem_shared_team_lives_and_hero_respawn(
       };
       """
   )
-  assert res["startLives"] == 3, res
+  assert res["startLives"] == 4, res
   assert res["trappedState"] == "trapped", res
   assert res["elimState"] == "eliminated", res
-  assert res["livesAfterElim"] == 2, res
+  assert res["livesAfterElim"] == 3, res
   assert res["respawnState"] == "alive" and res["respawnInvuln"] > 0.5, res
 
 

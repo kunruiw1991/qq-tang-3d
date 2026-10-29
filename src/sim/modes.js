@@ -16,6 +16,9 @@ import {
   BUN_DROP_LOCK_SEC,
   BUN_RESPAWN_DELAY_SEC,
   BUN_WIN_SCORE,
+  CANDY_RAIN_INTERVAL_SEC,
+  CLASSIC_RESPAWN_SEC,
+  CLASSIC_TEAM_LIVES,
   EVENT_TYPES,
   GRID_COLS,
   GRID_ROWS,
@@ -27,12 +30,45 @@ import {
   PLAYER_RESPAWN_SEC,
   PLAYER_STATES,
   RESPAWN_INVULN_SEC,
+  SUDDEN_DEATH_START_SEC,
   TILE_TYPE,
 } from '../contracts/constants.js';
 import { computeEffectiveSpeed } from './characters.js';
 import { isInBounds } from './arenas.js';
-import { spawnPickup } from './combat.js';
-import { circleOverlapsAABB, clamp } from './physics.js';
+import { eliminatePlayer, spawnPickup } from './combat.js';
+import { circleOverlapsAABB, circleOverlapsTile, clamp } from './physics.js';
+
+export function buildSpiralPath(cols = GRID_COLS, rows = GRID_ROWS) {
+  const path = [];
+  let top = 1;
+  let bottom = Math.max(1, rows - 2);
+  let left = 1;
+  let right = Math.max(1, cols - 2);
+
+  while (top <= bottom && left <= right) {
+    for (let c = left; c <= right; c += 1) {
+      path.push({ col: c, row: top });
+    }
+    top += 1;
+    for (let r = top; r <= bottom; r += 1) {
+      path.push({ col: right, row: r });
+    }
+    right -= 1;
+    if (top <= bottom) {
+      for (let c = right; c >= left; c -= 1) {
+        path.push({ col: c, row: bottom });
+      }
+      bottom -= 1;
+    }
+    if (left <= right) {
+      for (let r = bottom; r >= top; r -= 1) {
+        path.push({ col: left, row: r });
+      }
+      left += 1;
+    }
+  }
+  return path;
+}
 
 export function resolveModeId(modeId) {
   return MODE_IDS.includes(modeId) ? modeId : 'classic_2v2';
@@ -42,8 +78,23 @@ export function resolveModeId(modeId) {
  * Initializes mode-specific state on the simulation instance.
  */
 export function initModeState(sim, arenaData) {
+  const classicLives = sim.classicTeamLives || CLASSIC_TEAM_LIVES;
   sim.teamScores = { blue: 0, red: 0 };
-  sim.teamLives = sim.modeId === 'boss_golem' ? BOSS_SHARED_LIVES : 0;
+  sim.teamStockLives = {
+    blue: sim.modeId === 'classic_2v2' ? classicLives : 0,
+    red: sim.modeId === 'classic_2v2' ? classicLives : 0,
+  };
+  sim.teamLives =
+    sim.modeId === 'boss_golem'
+      ? BOSS_SHARED_LIVES
+      : sim.modeId === 'classic_2v2'
+        ? classicLives
+        : 0;
+  sim.suddenDeathActive = false;
+  sim.candyRainWarningActive = false;
+  sim.candyRainTimer = 0;
+  sim.candyRainIndex = 0;
+  sim.candyRainPath = buildSpiralPath(GRID_COLS, GRID_ROWS);
   sim.looseBuns = [];
   sim.bunShrineSlots = arenaData.bunShrineSlots.slice();
   sim.bunRespawnTimer = 0;
@@ -183,10 +234,23 @@ function spawnShrineBunsUpToTarget(sim, overrideTarget = null) {
 }
 
 /**
- * Schedules player respawn when eliminated in bun_grab or boss_golem.
+ * Schedules player respawn when eliminated in classic_2v2, bun_grab, or boss_golem.
  */
 export function handlePlayerEliminatedForMode(sim, player) {
-  if (sim.modeId === 'bun_grab') {
+  if (sim.modeId === 'classic_2v2') {
+    const teamKey = player.team === 0 ? 'blue' : 'red';
+    if (sim.teamStockLives && sim.teamStockLives[teamKey] > 0) {
+      sim.teamStockLives[teamKey] = Math.max(0, sim.teamStockLives[teamKey] - 1);
+    }
+    if (sim.teamStockLives) {
+      sim.teamLives = sim.teamStockLives.blue;
+    }
+    if (sim.teamStockLives && sim.teamStockLives[teamKey] > 0) {
+      player.respawnTimer = CLASSIC_RESPAWN_SEC;
+    } else {
+      player.respawnTimer = 0;
+    }
+  } else if (sim.modeId === 'bun_grab') {
     player.respawnTimer = PLAYER_RESPAWN_SEC;
   } else if (sim.modeId === 'boss_golem') {
     if (sim.teamLives > 0) {
@@ -201,10 +265,10 @@ export function handlePlayerEliminatedForMode(sim, player) {
 }
 
 /**
- * Handles Mechanical Golem taking 1 HP damage: drops loot every 3 HP lost and triggers
+ * Handles Mechanical Golem taking HP damage: drops loot every 3 HP threshold crossed and triggers
  * Co-op Victory at 0 HP.
  */
-export function handleBossDamaged(sim, attackerId) {
+export function handleBossDamaged(sim, attackerId, prevHp = null) {
   const boss = sim.boss;
   if (!boss) return;
 
@@ -236,8 +300,11 @@ export function handleBossDamaged(sim, attackerId) {
 
   boss._hurtFlashSec = 0.28;
 
-  // Drop 2 helpful powerup/mount items onto nearby open tiles every 3 HP lost (hp = 9, 6, 3)
-  if (boss.hp % 3 === 0) {
+  // Drop 2 helpful powerup/mount items onto nearby open tiles every 3 HP threshold crossed
+  const oldBucket = prevHp !== null ? Math.floor((prevHp - 1) / 3) : Math.floor(boss.hp / 3);
+  const newBucket = Math.floor(boss.hp / 3);
+  const crossedThreeHp = prevHp !== null ? oldBucket > newBucket || boss.hp % 3 === 0 : boss.hp % 3 === 0;
+  if (crossedThreeHp) {
     const bossDropPool = [
       ITEM_TYPES.POWER,
       ITEM_TYPES.BUBBLE,
@@ -267,12 +334,34 @@ export function handleBossDamaged(sim, attackerId) {
   }
 }
 
+function findSafeRespawnTile(sim, prefCol, prefRow) {
+  const c0 = clamp(prefCol, 0, GRID_COLS - 1);
+  const r0 = clamp(prefRow, 0, GRID_ROWS - 1);
+  if (sim.grid[r0][c0] !== TILE_TYPE.HARD_WALL) {
+    return { col: c0, row: r0 };
+  }
+  for (let radius = 1; radius <= 14; radius += 1) {
+    for (let dr = -radius; dr <= radius; dr += 1) {
+      for (let dc = -radius; dc <= radius; dc += 1) {
+        if (Math.abs(dc) !== radius && Math.abs(dr) !== radius) continue;
+        const nc = c0 + dc;
+        const nr = r0 + dr;
+        if (isInBounds(nc, nr) && sim.grid[nr][nc] !== TILE_TYPE.HARD_WALL) {
+          return { col: nc, row: nr };
+        }
+      }
+    }
+  }
+  return { col: 7, row: 6 };
+}
+
 function respawnPlayer(sim, player) {
+  const safeTile = findSafeRespawnTile(sim, player.spawnCol, player.spawnRow);
   player.state = PLAYER_STATES.ALIVE;
-  player.x = player.spawnCol + 0.5;
-  player.z = player.spawnRow + 0.5;
-  player.col = player.spawnCol;
-  player.row = player.spawnRow;
+  player.x = safeTile.col + 0.5;
+  player.z = safeTile.row + 0.5;
+  player.col = safeTile.col;
+  player.row = safeTile.row;
   player.trapTimer = 0;
   player.trappedBy = null;
   player.respawnTimer = 0;
@@ -327,13 +416,89 @@ function computeTeamCombatTieScore(sim, team) {
   return score;
 }
 
+function dropNextCandyRainBlock(sim) {
+  if (!sim.candyRainPath || sim.candyRainIndex >= sim.candyRainPath.length - 1) {
+    return false;
+  }
+
+  let target = null;
+  while (sim.candyRainIndex < sim.candyRainPath.length - 1) {
+    const cand = sim.candyRainPath[sim.candyRainIndex++];
+    if (sim.grid[cand.row][cand.col] !== TILE_TYPE.HARD_WALL) {
+      target = cand;
+      break;
+    }
+  }
+  if (!target) return false;
+
+  const { col, row } = target;
+  sim.grid[row][col] = TILE_TYPE.HARD_WALL;
+
+  // Vaporize bubbles at (col, row)
+  for (let i = sim.bubbles.length - 1; i >= 0; i -= 1) {
+    const b = sim.bubbles[i];
+    const bc = clamp(Math.floor(b.x), 0, GRID_COLS - 1);
+    const br = clamp(Math.floor(b.z), 0, GRID_ROWS - 1);
+    if ((bc === col && br === row) || (b.col === col && b.row === row)) {
+      const owner = sim.playersById.get(b.ownerId);
+      if (owner) {
+        owner.activeBubbles = Math.max(0, owner.activeBubbles - 1);
+      }
+      sim.bubbles.splice(i, 1);
+    }
+  }
+
+  // Vaporize pickups at (col, row)
+  for (let i = sim.pickups.length - 1; i >= 0; i -= 1) {
+    if (sim.pickups[i].col === col && sim.pickups[i].row === row) {
+      sim.pickups.splice(i, 1);
+    }
+  }
+
+  // Crush (trap -> KO) any player under (col, row)
+  for (let i = 0; i < sim.players.length; i += 1) {
+    const p = sim.players[i];
+    if (p.state === PLAYER_STATES.ELIMINATED) continue;
+    const overlaps =
+      (p.col === col && p.row === row) ||
+      circleOverlapsTile(p.x, p.z, PLAYER_RADIUS * 0.85, col, row);
+    if (overlaps) {
+      if (p.state === PLAYER_STATES.ALIVE) {
+        p.state = PLAYER_STATES.TRAPPED;
+        sim.events.push({
+          type: EVENT_TYPES.TRAP,
+          playerId: p.id,
+          attackerId: 'candy_rain',
+          x: p.x,
+          z: p.z,
+        });
+      }
+      eliminatePlayer(
+        sim,
+        p,
+        null,
+        'candy_rain',
+        handlePlayerEliminatedForMode,
+        dropCarriedBun
+      );
+    }
+  }
+
+  sim.events.push({
+    type: EVENT_TYPES.CANDY_RAIN_DROP,
+    col,
+    row,
+  });
+  return true;
+}
+
 /**
  * Steps mode-specific timers, respawns, bun pickups/deliveries, and win/loss checks.
  */
 export function stepModeRules(sim, dt) {
   if (sim.phase !== MATCH_PHASES.PLAYING) return;
 
-  // 1. Tick player respawns in bun_grab and boss_golem
+  // 1. Tick player respawns across all modes (classic_2v2 stock lives, bun_grab, boss_golem)
   for (let i = 0; i < sim.players.length; i += 1) {
     const p = sim.players[i];
     if (p.state === PLAYER_STATES.ELIMINATED && p.respawnTimer > 0) {
@@ -348,8 +513,38 @@ export function stepModeRules(sim, dt) {
   sim.timeRemainingSec = Math.max(0, sim.timeRemainingSec - dt);
 
   if (sim.modeId === 'classic_2v2') {
+    // 1 s before "糖果雨" starts (<= 31.0 s remaining), trigger warning stamp & rumble SFX!
+    if (
+      sim.timeRemainingSec <= SUDDEN_DEATH_START_SEC + 1.0 + 1e-9 &&
+      sim.timeRemainingSec > 1e-9 &&
+      !sim.candyRainWarningActive
+    ) {
+      sim.candyRainWarningActive = true;
+      sim.events.push({
+        type: EVENT_TYPES.CANDY_RAIN_WARNING,
+        timeRemainingSec: +sim.timeRemainingSec.toFixed(3),
+      });
+    }
+
+    // "糖果雨" sudden death when <= 30 s remain: indestructible hard candy blocks spiral in every 0.5 s
+    if (sim.timeRemainingSec <= SUDDEN_DEATH_START_SEC + 1e-9 && sim.timeRemainingSec > 1e-9) {
+      if (!sim.suddenDeathActive) {
+        sim.suddenDeathActive = true;
+        sim.candyRainTimer = 0;
+        dropNextCandyRainBlock(sim);
+      } else {
+        sim.candyRainTimer = (sim.candyRainTimer || 0) + dt;
+        while (sim.candyRainTimer + 1e-9 >= CANDY_RAIN_INTERVAL_SEC) {
+          sim.candyRainTimer -= CANDY_RAIN_INTERVAL_SEC;
+          dropNextCandyRainBlock(sim);
+        }
+      }
+    }
+
     let blueActive = 0;
     let redActive = 0;
+    let blueRespawning = 0;
+    let redRespawning = 0;
     let blueHealthy = 0;
     let redHealthy = 0;
     let blueKos = 0;
@@ -360,26 +555,41 @@ export function stepModeRules(sim, dt) {
       if (p.team === 0) {
         blueKos += p.stats.kos;
         if (p.state !== PLAYER_STATES.ELIMINATED) blueActive += 1;
+        else if (p.respawnTimer > 0) blueRespawning += 1;
         if (p.state === PLAYER_STATES.ALIVE) blueHealthy += 1;
       } else {
         redKos += p.stats.kos;
         if (p.state !== PLAYER_STATES.ELIMINATED) redActive += 1;
+        else if (p.respawnTimer > 0) redRespawning += 1;
         if (p.state === PLAYER_STATES.ALIVE) redHealthy += 1;
       }
     }
     sim.teamScores.blue = blueKos;
     sim.teamScores.red = redKos;
+    const blueHearts = sim.teamStockLives ? sim.teamStockLives.blue : blueActive;
+    const redHearts = sim.teamStockLives ? sim.teamStockLives.red : redActive;
+    sim.teamLives = blueHearts;
 
-    if (redActive === 0 && blueActive > 0) {
+    const blueOut = blueHearts <= 0 || (blueActive === 0 && blueRespawning === 0);
+    const redOut = redHearts <= 0 || (redActive === 0 && redRespawning === 0);
+
+    if (redOut && !blueOut) {
       concludeMatch(sim, MATCH_PHASES.VICTORY, 0);
       return;
     }
-    if (blueActive === 0 && redActive > 0) {
+    if (blueOut && !redOut) {
       concludeMatch(sim, MATCH_PHASES.DEFEAT, 1);
       return;
     }
-    if ((blueActive === 0 && redActive === 0) || sim.timeRemainingSec <= 1e-9) {
-      if (blueActive !== redActive) {
+    if ((blueOut && redOut) || sim.timeRemainingSec <= 1e-9) {
+      // Timer end or simultaneous 0-heart wipe: more hearts wins, then KOs, then active/healthy/tie-score
+      if (blueHearts !== redHearts) {
+        const winTeam = blueHearts > redHearts ? 0 : 1;
+        concludeMatch(sim, winTeam === 0 ? MATCH_PHASES.VICTORY : MATCH_PHASES.DEFEAT, winTeam);
+      } else if (blueKos !== redKos) {
+        const winTeam = blueKos > redKos ? 0 : 1;
+        concludeMatch(sim, winTeam === 0 ? MATCH_PHASES.VICTORY : MATCH_PHASES.DEFEAT, winTeam);
+      } else if (blueActive !== redActive) {
         const winTeam = blueActive > redActive ? 0 : 1;
         concludeMatch(sim, winTeam === 0 ? MATCH_PHASES.VICTORY : MATCH_PHASES.DEFEAT, winTeam);
       } else if (blueHealthy !== redHealthy) {

@@ -53,6 +53,38 @@ function createStarBadgeMesh(radius = 0.085, thickness = 0.025, mat) {
   return new THREE.Mesh(geo, mat);
 }
 
+const BASE_RIG_SCALE = 1.35;
+let _cachedYouMarkerTex = null;
+
+function getYouMarkerTexture() {
+  if (_cachedYouMarkerTex) return _cachedYouMarkerTex;
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, 256, 128);
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath();
+    ctx.roundRect(18, 12, 220, 74, 36);
+    ctx.fill();
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#facc15';
+    ctx.stroke();
+    ctx.fillStyle = '#fef08a';
+    ctx.font = '900 46px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('你 ▼', 128, 50);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  _cachedYouMarkerTex = tex;
+  return tex;
+}
+
 function shortestAngleDelta(fromRad, toRad) {
   let diff = (toRad - fromRad) % (Math.PI * 2);
   if (diff > Math.PI) diff -= Math.PI * 2;
@@ -74,37 +106,66 @@ export function createCharacterRig(characterId = 'miduo', options = {}) {
   const root = new THREE.Group();
   root.name = `char_${safeId}`;
 
-  // 1. Crisp Team Floor Ring (Blue #38BDF8 vs Red #FB7185) + P1 inner golden star ring
+  // 1. Dark Contact-Shadow Blob + Bold Team Floor Ring + P1 Persistent Brighter Outline & "你" Arrow
   const floorGroup = new THREE.Group();
-  const teamColor = team === 0 ? 0x38bdf8 : 0xfb7185;
+
+  const shadowBlob = new THREE.Mesh(
+    new THREE.CircleGeometry(0.46, 28),
+    new THREE.MeshBasicMaterial({
+      color: 0x090d16,
+      transparent: true,
+      opacity: 0.56,
+      depthWrite: false,
+    })
+  );
+  shadowBlob.rotation.x = -Math.PI * 0.5;
+  shadowBlob.position.y = 0.015;
+  floorGroup.add(shadowBlob);
+
+  const teamColor = team === 0 ? 0x00d4ff : 0xff1744;
   const teamRingMat = new THREE.MeshBasicMaterial({
     color: teamColor,
     side: THREE.DoubleSide,
     transparent: false,
   });
-  const teamRing = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.47, 28), teamRingMat);
+  const teamRing = new THREE.Mesh(new THREE.RingGeometry(0.40, 0.58, 32), teamRingMat);
   teamRing.rotation.x = -Math.PI * 0.5;
   teamRing.position.y = 0.022;
   floorGroup.add(teamRing);
 
   let p1Pointer = null;
+  let p1YouMarker = null;
   if (isPrimaryHuman) {
     p1Pointer = new THREE.Mesh(
-      new THREE.RingGeometry(0.49, 0.55, 28),
+      new THREE.RingGeometry(0.58, 0.70, 32),
       new THREE.MeshBasicMaterial({
-        color: 0xfacc15,
+        color: 0xfff000,
         side: THREE.DoubleSide,
         transparent: false,
       })
     );
     p1Pointer.rotation.x = -Math.PI * 0.5;
-    p1Pointer.position.y = 0.025;
+    p1Pointer.position.y = 0.026;
     floorGroup.add(p1Pointer);
+
+    // Bouncing golden arrow cone above P1 for the first 5 seconds (the >=48px "你 · 名字 ▼" badge renders in HUD DOM)
+    p1YouMarker = new THREE.Group();
+    p1YouMarker.position.set(0, 2.08, 0);
+    const arrowCone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.18, 0.32, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: false })
+    );
+    arrowCone.rotation.x = Math.PI;
+    arrowCone.position.y = 0;
+    p1YouMarker.add(arrowCone);
+    p1YouMarker.visible = false;
+    root.add(p1YouMarker);
   }
   root.add(floorGroup);
 
-  // 2. Actor Pivot (elevates smoothly when riding Turtle/UFO, jumping, or floating in water-trap!)
+  // 2. Actor Pivot (scaled ×1.35 during match play; elevates smoothly when riding Turtle/UFO or jumping!)
   const actorPivot = new THREE.Group();
+  actorPivot.scale.setScalar(BASE_RIG_SCALE);
   root.add(actorPivot);
 
   const bodyTilt = new THREE.Group();
@@ -239,6 +300,17 @@ export function createCharacterRig(characterId = 'miduo', options = {}) {
   // Rotate -90 deg around Y so UV (0.5, 0.5) faces directly +Z forward!
   headMesh.rotation.y = -Math.PI * 0.5;
   headPivot.add(headMesh);
+
+  if (isPrimaryHuman) {
+    // Persistent brighter outline halo around P1 head & torso
+    const p1OutlineMat = new THREE.MeshBasicMaterial({
+      color: 0xfef08a,
+      side: THREE.BackSide,
+      transparent: false,
+    });
+    const headOutline = new THREE.Mesh(new THREE.SphereGeometry(0.372, 24, 18), p1OutlineMat);
+    headPivot.add(headOutline);
+  }
 
   for (const side of [-1, 1]) {
     const ear = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), skinMat);
@@ -554,10 +626,12 @@ export function createCharacterRig(characterId = 'miduo', options = {}) {
   const rig = {
     characterId: safeId,
     team,
+    isPrimaryHuman,
     root,
     floorGroup,
     teamRing,
     p1Pointer,
+    p1YouMarker,
     actorPivot,
     bodyTilt,
     torsoGroup,
@@ -601,13 +675,23 @@ export function setCharacterExpression(rig, expr) {
  * @param {number} timeSec
  * @param {number} dtSec
  * @param {object} [poseOverride] - { mode: 'celebrate' | 'polite_clap' | 'turntable' }
+ * @param {number} [matchElapsedSec]
  */
-export function updateCharacterRig(rig, player, timeSec = 0, dtSec = 1 / 60, poseOverride = null) {
+export function updateCharacterRig(
+  rig,
+  player,
+  timeSec = 0,
+  dtSec = 1 / 60,
+  poseOverride = null,
+  matchElapsedSec = 0
+) {
   const dt = Math.max(0, Math.min(dtSec || 1 / 60, 0.1));
 
   // Showcase / Podium standalone animation path
   if (poseOverride && poseOverride.mode) {
     rig.root.visible = true;
+    rig.actorPivot.scale.setScalar(1.12);
+    if (rig.p1YouMarker) rig.p1YouMarker.visible = false;
     const phase = timeSec * 5.4 + (poseOverride.phaseOffset || 0);
 
     if (poseOverride.mode === 'celebrate') {
@@ -662,6 +746,7 @@ export function updateCharacterRig(rig, player, timeSec = 0, dtSec = 1 / 60, pos
   }
 
   rig.root.visible = true;
+  rig.actorPivot.scale.setScalar(BASE_RIG_SCALE);
   const wx = tileToWorldX(player.x);
   const wz = tileToWorldZ(player.z);
   rig.root.position.set(wx, 0, wz);
@@ -689,6 +774,14 @@ export function updateCharacterRig(rig, player, timeSec = 0, dtSec = 1 / 60, pos
   if (rig.p1Pointer) {
     const s = 1 + Math.sin(timeSec * 4.5) * 0.06;
     rig.p1Pointer.scale.set(s, s, 1);
+  }
+
+  if (rig.p1YouMarker) {
+    const showMarker = matchElapsedSec <= 5.0;
+    rig.p1YouMarker.visible = showMarker;
+    if (showMarker) {
+      rig.p1YouMarker.position.y = 2.08 + Math.abs(Math.sin(timeSec * 8.5)) * 0.26;
+    }
   }
 
   // State 1: Trapped inside Giant Water Bubble (`state === 'trapped'`)

@@ -10,7 +10,11 @@
 import {
   ARENA_IDS,
   CHARACTER_IDS,
+  COUNTDOWN_TOTAL_SEC,
+  EVENT_TYPES,
   FIXED_DT,
+  HIT_STOP_KO_SEC,
+  HIT_STOP_TRAP_SEC,
   MATCH_PHASES,
   MAX_ACCUMULATOR_SEC,
   MODE_IDS,
@@ -46,6 +50,50 @@ function pickDefaultP2Char(p1CharId) {
   return p1CharId === 'wanzi' ? 'miduo' : 'wanzi';
 }
 
+function recordHallProgress(snapshot) {
+  if (!snapshot || typeof window === 'undefined') return;
+  try {
+    const storage = window.localStorage;
+    if (!storage) return;
+    const raw = storage.getItem('qq_hall_progress');
+    let root = {};
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          root = parsed;
+        }
+      } catch (_) {
+        root = {};
+      }
+    }
+    const prev =
+      root.tang && typeof root.tang === 'object' && !Array.isArray(root.tang)
+        ? root.tang
+        : {};
+    const p1 = Array.isArray(snapshot.players)
+      ? snapshot.players.find((p) => p.id === 'p1') || snapshot.players[0]
+      : null;
+    const kos = Number(p1?.stats?.kos || 0);
+    const rescues = Number(p1?.stats?.rescues || 0);
+    const buns = Number(p1?.stats?.bunsScored || 0);
+    const isWin =
+      snapshot.phase === MATCH_PHASES.VICTORY &&
+      (snapshot.winnerTeam === 0 ||
+        snapshot.winnerTeam === 'blue' ||
+        (Array.isArray(snapshot.winnerIds) && snapshot.winnerIds.includes('p1')));
+    const matchScore = kos * 100 + rescues * 60 + buns * 80 + (isWin ? 200 : 25);
+    const starsEarned = isWin ? (kos >= 2 || rescues >= 1 || buns >= 2 ? 3 : 2) : 1;
+    root.tang = {
+      plays: Math.max(0, Number(prev.plays || 0)) + 1,
+      best: Math.max(Number(prev.best || 0), matchScore),
+      stars: Math.max(Number(prev.stars || 0), starsEarned),
+      last: Date.now(),
+    };
+    storage.setItem('qq_hall_progress', JSON.stringify(root));
+  } catch (_) {}
+}
+
 function bootstrapApp() {
   const canvas = document.querySelector(`[data-testid="${TEST_IDS.ARENA_CANVAS}"]`);
   const uiRoot = document.getElementById('ui-root');
@@ -58,12 +106,31 @@ function bootstrapApp() {
   let autoPlayP1 = false;
   let nextMatchSeed = 20261029;
 
+  function readSavedDifficulty() {
+    try {
+      const saved = window.localStorage?.getItem('qq_tang_difficulty');
+      if (saved === 'easy' || saved === 'normal') return saved;
+    } catch (_) {}
+    return 'easy';
+  }
+
+  function writeSavedDifficulty(diff) {
+    const safe = diff === 'normal' ? 'normal' : 'easy';
+    try {
+      window.localStorage?.setItem('qq_tang_difficulty', safe);
+    } catch (_) {}
+    return safe;
+  }
+
+  const initialDifficulty = writeSavedDifficulty(readSavedDifficulty());
+
   const selectedConfig = {
     modeId: 'classic_2v2',
     arenaId: 'candy_town',
     p1CharacterId: 'miduo',
     p2CharacterId: 'wanzi',
     p2Enabled: false,
+    difficulty: initialDifficulty,
   };
 
   let lastRestartOptions = { ...selectedConfig };
@@ -87,7 +154,16 @@ function bootstrapApp() {
   let lastRenderCostMs = 0;
   let disposed = false;
   let rafId = 0;
+  let countdownRemainingSec = 0;
+  let lastCountdownBeepStage = 0;
+  let hitStopRemainingSec = 0;
+  let lastHitStopSec = 0;
+  let hitStopCount = 0;
+  let respectHitStopInStepFrames = false;
+  let lastFuseTickStepByBubble = new Map();
   const pendingVisualEvents = [];
+
+  const projectWorldToScreenFn = (wx, wy, wz) => renderer.projectWorldToScreen(wx, wy, wz);
 
   function syncViewportSize(force = false) {
     const w = Math.max(1, Math.round(window.innerWidth || canvas.clientWidth || 1280));
@@ -274,6 +350,27 @@ function bootstrapApp() {
     onOpenSelect: () => {
       openSelectScreen();
     },
+    onQuickStartClick: () => {
+      audio.playUiTap();
+      selectedConfig.modeId = 'classic_2v2';
+      selectedConfig.arenaId = 'candy_town';
+      selectedConfig.p1CharacterId = 'miduo';
+      selectedConfig.p2CharacterId = 'wanzi';
+      selectedConfig.p2Enabled = false;
+      selectedConfig.difficulty = writeSavedDifficulty('easy');
+      nextMatchSeed = (nextMatchSeed + 7919) >>> 0;
+      startMatch({
+        modeId: 'classic_2v2',
+        arenaId: 'candy_town',
+        p1CharacterId: 'miduo',
+        p2CharacterId: 'wanzi',
+        p2Enabled: false,
+        difficulty: 'easy',
+        seed: nextMatchSeed,
+        botBehavior: 'active',
+        withCountdown: true,
+      });
+    },
     onSelectCharacter: (charId) => {
       if (!CHARACTER_IDS.includes(charId)) return;
       audio.playUiTap();
@@ -304,6 +401,12 @@ function bootstrapApp() {
       applyRendererScreenMode(SCREEN_IDS.SELECT, previewSnapshot);
       renderActiveScene(FIXED_DT);
     },
+    onToggleDifficulty: () => {
+      audio.playUiTap();
+      const nextDiff = selectedConfig.difficulty === 'normal' ? 'easy' : 'normal';
+      selectedConfig.difficulty = writeSavedDifficulty(nextDiff);
+      hud.syncSelectedConfig(selectedConfig);
+    },
     onToggle2P: () => {
       audio.playUiTap();
       selectedConfig.p2Enabled = !selectedConfig.p2Enabled;
@@ -323,8 +426,10 @@ function bootstrapApp() {
         p1CharacterId: selectedConfig.p1CharacterId,
         p2CharacterId: selectedConfig.p2CharacterId,
         p2Enabled: selectedConfig.p2Enabled,
+        difficulty: selectedConfig.difficulty,
         seed: nextMatchSeed,
         botBehavior: 'active',
+        withCountdown: true,
       });
     },
     onPauseClick: () => {
@@ -346,6 +451,7 @@ function bootstrapApp() {
       startMatch({
         ...lastRestartOptions,
         seed: nextMatchSeed,
+        withCountdown: true,
       });
     },
     onQuitToSelectClick: () => {
@@ -357,6 +463,7 @@ function bootstrapApp() {
       startMatch({
         ...lastRestartOptions,
         seed: nextMatchSeed,
+        withCountdown: true,
       });
     },
     onBackToSelectClick: () => {
@@ -370,6 +477,10 @@ function bootstrapApp() {
 
   function transitionToPodium() {
     input.releaseAllActiveInputs();
+    countdownRemainingSec = 0;
+    hitStopRemainingSec = 0;
+    hud.updateCountdown(0);
+    recordHallProgress(currentSimSnapshot);
     uiScreen = SCREEN_IDS.PODIUM;
     audio.setTrack('podium');
     hud.updatePodium(currentSimSnapshot);
@@ -377,8 +488,38 @@ function bootstrapApp() {
     applyRendererScreenMode(SCREEN_IDS.PODIUM, currentSimSnapshot);
   }
 
-  function stepSimulationTick(dt = FIXED_DT) {
+  function stepCountdownSlice(dt = FIXED_DT) {
+    if (countdownRemainingSec <= 0) return false;
+    countdownRemainingSec = Math.max(0, countdownRemainingSec - dt);
+    let stage = 0;
+    if (countdownRemainingSec > 1.0) stage = 3;
+    else if (countdownRemainingSec > 0.5) stage = 2;
+    else if (countdownRemainingSec > 0.12) stage = 1;
+    else if (countdownRemainingSec > 0) stage = -1; // GO!
+    if (stage !== lastCountdownBeepStage && stage !== 0) {
+      lastCountdownBeepStage = stage;
+      audio.playCountdownBeep(stage === -1);
+    }
+    hud.updateCountdown(countdownRemainingSec);
+    return true;
+  }
+
+  function stepSimulationTick(dt = FIXED_DT, allowHitStopFreeze = false) {
     if (uiScreen !== SCREEN_IDS.PLAYING || !simEngine) return;
+
+    if (countdownRemainingSec > 0) {
+      stepCountdownSlice(dt);
+      hud.stepFloatingPopups(dt, projectWorldToScreenFn);
+      return;
+    }
+
+    if (hitStopRemainingSec > 0) {
+      hitStopRemainingSec = Math.max(0, hitStopRemainingSec - dt);
+      if (allowHitStopFreeze) {
+        hud.stepFloatingPopups(dt, projectWorldToScreenFn);
+        return;
+      }
+    }
 
     const frameIntents = input.consumeFrameIntents(simEngine.p2Enabled);
     if (!autoPlayP1 && frameIntents.p1) {
@@ -389,14 +530,59 @@ function bootstrapApp() {
     }
 
     currentSimSnapshot = simEngine.step(dt);
+    if (typeof renderer.syncCameraFollow === 'function') {
+      renderer.syncCameraFollow(currentSimSnapshot, dt);
+    }
     if (Array.isArray(currentSimSnapshot.events) && currentSimSnapshot.events.length > 0) {
       for (let i = 0; i < currentSimSnapshot.events.length; i += 1) {
-        pendingVisualEvents.push(currentSimSnapshot.events[i]);
+        const ev = currentSimSnapshot.events[i];
+        pendingVisualEvents.push(ev);
+        if (ev.type === EVENT_TYPES.POP) {
+          hitStopRemainingSec = Math.max(hitStopRemainingSec, HIT_STOP_KO_SEC);
+          lastHitStopSec = HIT_STOP_KO_SEC;
+          hitStopCount += 1;
+        } else if (ev.type === EVENT_TYPES.TRAP) {
+          hitStopRemainingSec = Math.max(hitStopRemainingSec, HIT_STOP_TRAP_SEC);
+          lastHitStopSec = Math.max(lastHitStopSec, HIT_STOP_TRAP_SEC);
+          hitStopCount += 1;
+        }
       }
       if (pendingVisualEvents.length > 96) {
         pendingVisualEvents.splice(0, pendingVisualEvents.length - 96);
       }
+      hud.consumeCombatEventsForPopups(
+        currentSimSnapshot.events,
+        currentSimSnapshot.players,
+        projectWorldToScreenFn
+      );
     }
+    hud.stepFloatingPopups(dt, projectWorldToScreenFn);
+
+    // Fuse tick SFX in the last 0.8s of any active bubble
+    if (Array.isArray(currentSimSnapshot.bubbles)) {
+      const activeIds = new Set();
+      let playedTickThisFrame = false;
+      for (let i = 0; i < currentSimSnapshot.bubbles.length; i += 1) {
+        const b = currentSimSnapshot.bubbles[i];
+        activeIds.add(b.id);
+        if (b.fuseRemaining > 0 && b.fuseRemaining <= 0.80) {
+          const stepBucket = Math.floor(b.fuseRemaining / 0.20);
+          const prevBucket = lastFuseTickStepByBubble.get(b.id);
+          if (prevBucket !== stepBucket) {
+            lastFuseTickStepByBubble.set(b.id, stepBucket);
+            if (!playedTickThisFrame) {
+              playedTickThisFrame = true;
+              const urgency = Math.max(0, Math.min(1, (0.80 - b.fuseRemaining) / 0.80));
+              audio.playFuseTick(urgency);
+            }
+          }
+        }
+      }
+      for (const k of lastFuseTickStepByBubble.keys()) {
+        if (!activeIds.has(k)) lastFuseTickStepByBubble.delete(k);
+      }
+    }
+
     audio.consumeEvents(currentSimSnapshot.events);
 
     if (currentSimSnapshot.phase !== MATCH_PHASES.PLAYING) {
@@ -424,11 +610,17 @@ function bootstrapApp() {
       ? options.p2CharacterId
       : pickDefaultP2Char(p1CharacterId);
 
+    const resolvedDifficulty =
+      options.difficulty === 'easy' || options.difficulty === 'normal'
+        ? options.difficulty
+        : readSavedDifficulty();
+
     selectedConfig.modeId = modeId;
     selectedConfig.arenaId = arenaId;
     selectedConfig.p1CharacterId = p1CharacterId;
     selectedConfig.p2CharacterId = p2CharacterId;
     selectedConfig.p2Enabled = p2Enabled;
+    selectedConfig.difficulty = resolvedDifficulty;
 
     lastRestartOptions = {
       modeId,
@@ -437,6 +629,7 @@ function bootstrapApp() {
       p2CharacterId,
       p2Enabled,
       botBehavior: options.botBehavior === 'idle' ? 'idle' : 'active',
+      difficulty: resolvedDifficulty,
     };
 
     autoPlayP1 = Boolean(options.autoPlayP1);
@@ -447,6 +640,7 @@ function bootstrapApp() {
 
     simEngine = new SimEngine({
       ...options,
+      difficulty: resolvedDifficulty,
       modeId,
       arenaId,
       p1CharacterId,
@@ -457,6 +651,18 @@ function bootstrapApp() {
     });
 
     pendingVisualEvents.length = 0;
+    lastFuseTickStepByBubble.clear();
+    hitStopRemainingSec = 0;
+    lastHitStopSec = 0;
+    hitStopCount = 0;
+    respectHitStopInStepFrames = Boolean(options.respectHitStop);
+    countdownRemainingSec = options.withCountdown ? COUNTDOWN_TOTAL_SEC : 0;
+    lastCountdownBeepStage = 0;
+    if (countdownRemainingSec > 0) {
+      lastCountdownBeepStage = 3;
+      audio.playCountdownBeep(false);
+    }
+
     input.setP2Enabled(p2Enabled);
     input.resetForMatch({ p2Enabled });
     uiScreen = SCREEN_IDS.PLAYING;
@@ -465,6 +671,8 @@ function bootstrapApp() {
     audio.setTrack(matchTrack);
 
     currentSimSnapshot = simEngine.getSnapshot();
+    hud.clearFloatingPopups();
+    hud.updateCountdown(countdownRemainingSec);
     hud.syncSelectedConfig(selectedConfig);
     hud.setScreen(SCREEN_IDS.PLAYING);
     hud.updateHud(currentSimSnapshot, audio.isMuted());
@@ -475,6 +683,7 @@ function bootstrapApp() {
     }
     applyRendererScreenMode(SCREEN_IDS.PLAYING, currentSimSnapshot);
     renderActiveScene(0);
+    hud.updateHud(currentSimSnapshot, audio.isMuted(), projectWorldToScreenFn);
 
     return getState();
   }
@@ -485,7 +694,7 @@ function bootstrapApp() {
     return deterministicMode;
   }
 
-  function stepFrames(count = 1) {
+  function stepFrames(count = 1, stepOptions = {}) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     syncViewportSize(false);
 
@@ -493,9 +702,12 @@ function bootstrapApp() {
       return getState();
     }
 
+    const allowHitStopFreeze =
+      Boolean(stepOptions?.respectHitStop) || respectHitStopInStepFrames;
+
     if (uiScreen === SCREEN_IDS.PLAYING && simEngine) {
       for (let i = 0; i < n; i += 1) {
-        stepSimulationTick(FIXED_DT);
+        stepSimulationTick(FIXED_DT, allowHitStopFreeze);
         if (uiScreen !== SCREEN_IDS.PLAYING) {
           // Match naturally concluded -> remaining frames animate Podium
           const rem = n - 1 - i;
@@ -503,7 +715,7 @@ function bootstrapApp() {
           return getState();
         }
       }
-      hud.updateHud(currentSimSnapshot, audio.isMuted());
+      hud.updateHud(currentSimSnapshot, audio.isMuted(), projectWorldToScreenFn);
       renderFromStepFrames(n * FIXED_DT);
     } else if (uiScreen === SCREEN_IDS.PAUSED) {
       // Simulation stays frozen while paused
@@ -542,6 +754,11 @@ function bootstrapApp() {
       uiScreen,
       selectedConfig: { ...selectedConfig },
       hudClickableCount: hud.getVisibleClickableCount(),
+      countdownRemainingSec: Number(countdownRemainingSec.toFixed(4)),
+      hitStopRemainingSec: Number(hitStopRemainingSec.toFixed(4)),
+      lastHitStopSec: Number(lastHitStopSec.toFixed(4)),
+      hitStopCount,
+      activePopups: hud.getActivePopups(),
       errors: getTrackedErrors(),
       sim: currentSimSnapshot ? cloneJsonSafe(currentSimSnapshot) : null,
       render: readRenderDiagnostics(),
@@ -603,12 +820,12 @@ function bootstrapApp() {
         accumulatorSec = Math.min(MAX_ACCUMULATOR_SEC, accumulatorSec + clampedDt);
         let stepped = false;
         while (accumulatorSec >= FIXED_DT && uiScreen === SCREEN_IDS.PLAYING) {
-          stepSimulationTick(FIXED_DT);
+          stepSimulationTick(FIXED_DT, true);
           accumulatorSec -= FIXED_DT;
           stepped = true;
         }
         if (stepped && uiScreen === SCREEN_IDS.PLAYING) {
-          hud.updateHud(currentSimSnapshot, audio.isMuted());
+          hud.updateHud(currentSimSnapshot, audio.isMuted(), projectWorldToScreenFn);
         }
         if (!shouldYieldSoftwareRender) {
           renderActiveScene(clampedDt || FIXED_DT);

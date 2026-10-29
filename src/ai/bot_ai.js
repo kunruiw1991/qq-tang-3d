@@ -40,10 +40,79 @@ function createInfinityMatrix() {
 }
 
 /**
+ * Returns the cadence, reaction delay, and overconfidence profile for a bot:
+ *   - Enemy bots (team === 1):
+ *       'normal': 4 Hz (every 15 ticks), reaction delay 0.35–0.60 s via phase offset, 25% overconfidence on fuses > 1.2s
+ *       'easy':   3 Hz (every 20 ticks), reaction delay 0.40–0.60 s via phase offset, 35% overconfidence on fuses > 1.2s
+ *   - Human's teammate bot (team === 0 && !isHuman):
+ *       2 Hz (every 30 ticks), 0% overconfidence, prioritizes rescuing trapped p1 within 2 s
+ *   - Autopilot P1 (id === 'p1'):
+ *       full rate, 0% overconfidence
+ */
+export function getBotAiProfile(sim, bot, botSlotIndex = 0) {
+  const difficulty = sim && sim.difficulty === 'easy' ? 'easy' : 'normal';
+  const seed = sim && Number.isFinite(sim.seed) ? sim.seed : 12345;
+  const isEnemyBot = Boolean(bot && bot.team === 1);
+  const isTeammateBot = Boolean(bot && bot.team === 0 && !bot.isHuman);
+
+  if (isEnemyBot) {
+    const evalIntervalTicks = difficulty === 'easy' ? 20 : 15; // 3 Hz on easy, 4 Hz on normal
+    const delayTicks = 21 + ((botSlotIndex * 7 + (seed % 11)) % 16); // 21..36 ticks = 0.35..0.60 s
+    const reactionDelaySec = delayTicks * FIXED_DT;
+    const overconfidenceRate = difficulty === 'easy' ? 0.35 : 0.25;
+    return {
+      role: 'enemy',
+      difficulty,
+      evalIntervalTicks,
+      phaseOffsetTicks: delayTicks,
+      reactionDelaySec,
+      overconfidenceRate,
+    };
+  }
+
+  if (isTeammateBot) {
+    const evalIntervalTicks = 30; // 2 Hz
+    const phaseOffsetTicks = (botSlotIndex * 9 + (seed % 7)) % 15;
+    return {
+      role: 'teammate',
+      difficulty,
+      evalIntervalTicks,
+      phaseOffsetTicks,
+      reactionDelaySec: 0,
+      overconfidenceRate: 0,
+    };
+  }
+
+  return {
+    role: 'autopilot_p1',
+    difficulty,
+    evalIntervalTicks: 1,
+    phaseOffsetTicks: 0,
+    reactionDelaySec: 0,
+    overconfidenceRate: 0,
+  };
+}
+
+function deterministicOverconfidenceRoll(seed, botId, cycleId, col, row) {
+  let h = (seed ^ (cycleId * 0x9e3779b1) ^ (col * 73856093) ^ (row * 19349663)) >>> 0;
+  for (let i = 0; i < botId.length; i += 1) {
+    h = Math.imul(h ^ botId.charCodeAt(i), 2654435761) >>> 0;
+  }
+  h = Math.imul(h ^ (h >>> 16), 2246822507) >>> 0;
+  return (h >>> 0) / 4294967296;
+}
+
+/**
  * Computes time-to-impact (seconds; 0 = currently lethal, Infinity = completely safe)
  * for every tile on the 15x13 arena, including multi-hop bubble chain propagation!
  */
-export function computeDangerMap(sim, extraHypotheticalBubble = null, observerBot = null) {
+export function computeDangerMap(
+  sim,
+  extraHypotheticalBubble = null,
+  observerBot = null,
+  botProfile = null,
+  evalCycleId = 0
+) {
   const danger = createInfinityMatrix();
 
   // 1. Active lingering blasts are lethal right now (t = 0)
@@ -85,6 +154,7 @@ export function computeDangerMap(sim, extraHypotheticalBubble = null, observerBo
   const bubbles = sim.bubbles.map((b) => {
     const owner = sim.playersById ? sim.playersById.get(b.ownerId) : null;
     return {
+      id: b.id || 0,
       col: Math.max(0, Math.min(GRID_COLS - 1, Math.floor(b.x))),
       row: Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(b.z))),
       blastRange: b.blastRange,
@@ -96,6 +166,7 @@ export function computeDangerMap(sim, extraHypotheticalBubble = null, observerBo
 
   if (extraHypotheticalBubble) {
     bubbles.push({
+      id: 999999,
       col: extraHypotheticalBubble.col,
       row: extraHypotheticalBubble.row,
       blastRange: extraHypotheticalBubble.blastRange,
@@ -154,29 +225,56 @@ export function computeDangerMap(sim, extraHypotheticalBubble = null, observerBo
     }
   }
 
-  // Stamp minimum effective fuse onto danger matrix
-  // When observerBot is provided, friendly/own bubbles are perceived immediately (3.0s) so bots never
-  // self-trap or team-trap, while opposing rivals' bubbles enter perception during their warning pulse
-  // (making arcade 2v2 matches decisive and letting a 5-year-old child's traps genuinely land!).
-  const enemyNoticeFuseSec =
-    sim.modeId === 'bun_grab'
-      ? observerBot && observerBot.team === 1
-        ? 1.35
-        : 1.55
-      : observerBot && observerBot.team === 1
-        ? 0.72
-        : 2.35;
+  // Stamp minimum effective fuse onto danger matrix.
+  // Enemy bots have human-like imperfection:
+  //   1) Reaction delay (0.35–0.60 s): newly dropped opposing bubbles are not noticed until reactionDelaySec
+  //   2) Overconfidence (25% normal / 35% easy): when a threatening fuse has > 1.2 s remaining,
+  //      the enemy ignores it for this evaluation cycle.
+  // Friendly/own hypothetical bubbles in canSafelyDropBubble are always respected so E10 never self-traps.
+  const isEnemyObserver = Boolean(
+    !extraHypotheticalBubble && observerBot && observerBot.team === 1
+  );
+  const reactionDelaySec =
+    isEnemyObserver && botProfile ? botProfile.reactionDelaySec : 0;
+  const overconfidenceRate =
+    isEnemyObserver && botProfile ? botProfile.overconfidenceRate : 0;
 
   for (let i = 0; i < bubbles.length; i += 1) {
     const b = bubbles[i];
-    if (
-      observerBot &&
-      b.ownerId !== observerBot.id &&
-      b.ownerTeam !== null &&
-      b.ownerTeam !== observerBot.team &&
-      b.fuse > enemyNoticeFuseSec
-    ) {
-      continue;
+    if (isEnemyObserver && b.ownerId !== observerBot.id) {
+      const bubbleAgeSec = Math.max(0, BUBBLE_FUSE_SEC - b.fuse);
+      if (
+        b.ownerTeam !== null &&
+        b.ownerTeam !== observerBot.team &&
+        bubbleAgeSec < reactionDelaySec
+      ) {
+        continue;
+      }
+      if (overconfidenceRate > 0) {
+        // 25% (normal) / 35% (easy) overconfidence:
+        // 1) Per-cycle check when fuse > 1.2s
+        const cycleRoll = deterministicOverconfidenceRoll(
+          sim.seed || 12345,
+          observerBot.id,
+          evalCycleId,
+          b.col,
+          b.row
+        );
+        if (b.fuse > 1.2 && cycleRoll < overconfidenceRate) {
+          continue;
+        }
+        // 2) Per-bubble tunnel-vision roll: an overconfident bot underestimates this bubble until 0.24s left
+        const bubbleRoll = deterministicOverconfidenceRoll(
+          (sim.seed || 12345) ^ 0x5a5a5a5a,
+          observerBot.id,
+          b.id || 1,
+          b.col,
+          b.row
+        );
+        if (b.fuse > 0.24 && bubbleRoll < overconfidenceRate) {
+          continue;
+        }
+      }
     }
     const f = b.fuse;
     const rays = bubbleBlastSets[i];
@@ -625,12 +723,59 @@ function hasOpenGridPath(grid, bot, startCol, startRow, goalCol, goalRow) {
 }
 
 /**
+ * Computes weighted shortest breach cost from all alive opposing players (or a specific target)
+ * across the 15x13 grid where EMPTY costs 1.0 and SOFT_BLOCK costs 2.8, weighting human `p1` by x1.5.
+ */
+function computeEnemyBreachCostMap(sim, bot) {
+  const cost = createInfinityMatrix();
+  const queue = [];
+
+  const isEasyEnemy = sim.difficulty === 'easy' && bot && bot.team === 1;
+  for (let i = 0; i < sim.players.length; i += 1) {
+    const p = sim.players[i];
+    if (p.team === bot.team || p.state === PLAYER_STATES.ELIMINATED) continue;
+    // On normal difficulty, enemies weight hunting human p1 by x1.5 (-3.5 offset);
+    // on easy difficulty, enemies engage bot1/mid-map first for the opening 25s before pressuring p1's spawn corner.
+    let startBias = p.id === 'p1' ? -3.5 : 0;
+    if (isEasyEnemy && p.id === 'p1') {
+      startBias = sim.tick < 1500 && p.col <= 2 && p.row <= 2 ? 22.0 : 1.5;
+    }
+    if (isInBounds(p.col, p.row) && startBias < cost[p.row][p.col]) {
+      cost[p.row][p.col] = startBias;
+      queue.push({ col: p.col, row: p.row, c: startBias });
+    }
+  }
+
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    if (cur.c > cost[cur.row][cur.col]) continue;
+    for (let di = 0; di < CARDINAL_DIRS.length; di += 1) {
+      const nc = cur.col + CARDINAL_DIRS[di].dc;
+      const nr = cur.row + CARDINAL_DIRS[di].dr;
+      if (!isInBounds(nc, nr)) continue;
+      const cell = sim.grid[nr][nc];
+      if (cell === TILE_TYPE.HARD_WALL) continue;
+      const stepCost = cell === TILE_TYPE.SOFT_BLOCK ? 2.6 : 1.0;
+      const nextCost = cur.c + stepCost;
+      if (nextCost + 1e-4 < cost[nr][nc]) {
+        cost[nr][nc] = nextCost;
+        queue.push({ col: nc, row: nr, c: nextCost });
+      }
+    }
+  }
+  return cost;
+}
+
+/**
  * Computes a single bot's raw intent before safe-navigation anti-dither commit.
  */
 function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
   if (!bot || bot.state === PLAYER_STATES.ELIMINATED) {
     return { moveX: 0, moveZ: 0, dropBubble: false, useItem: false };
   }
+  const profile = getBotAiProfile(sim, bot, botSlotIndex);
+  bot._aiProfile = profile;
   bot._aiLastSteerCell = null;
   bot._aiUrgentGoal = false;
   bot._aiLastMinDanger = Infinity;
@@ -662,18 +807,43 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     return { moveX: 0, moveZ: 0, dropBubble: false, useItem: false };
   }
 
-  // 2. Danger map & urgent survival check
-  const dangerMap = computeDangerMap(sim, null, bot);
+  // 2. Danger map & urgent survival check (re-evaluated at 4 Hz normal / 3 Hz easy for enemies, 2 Hz for teammate bot)
+  const curTick = sim.tick || 0;
+  const evalCycleId = Math.floor(
+    (curTick + profile.phaseOffsetTicks) / Math.max(1, profile.evalIntervalTicks)
+  );
+  const curBlastCount = Array.isArray(sim.blasts) ? sim.blasts.length : 0;
+  if (
+    !bot._aiCachedDangerMap ||
+    bot._aiEvalCycleId !== evalCycleId ||
+    bot._aiCachedBlastCount !== curBlastCount ||
+    profile.evalIntervalTicks <= 1
+  ) {
+    bot._aiCachedDangerMap = computeDangerMap(sim, null, bot, profile, evalCycleId);
+    bot._aiEvalCycleId = evalCycleId;
+    bot._aiCachedBlastCount = curBlastCount;
+    bot._aiEvalCount = (bot._aiEvalCount || 0) + 1;
+  }
+  const dangerMap = bot._aiCachedDangerMap;
   const minBotDanger = getMinBotDanger(bot, dangerMap);
   bot._aiLastDangerMap = dangerMap;
   bot._aiLastMinDanger = minBotDanger;
-  if (minBotDanger <= 1.25) {
+  const urgentEvadeSec =
+    profile.role === 'enemy' ? (profile.difficulty === 'easy' ? 0.52 : 0.68) : 1.25;
+  if (minBotDanger <= urgentEvadeSec) {
     const move = findEscapeMove(sim, bot, dangerMap);
     return { moveX: move.moveX, moveZ: move.moveZ, dropBubble: false, useItem: false };
   }
 
-  // 3. Safe reachability from current tile (strictly safe for normal objectives; early-fuse-aware for urgent rescue/pop)
-  const { dist, firstStep } = computeSafeReachability(sim, bot, dangerMap, botSlotIndex, false);
+  // 3. Safe reachability from current tile (enemy bots allow crossing early fuses > 1.2s to press attacks)
+  const allowEnemyEarlyCross = profile.role === 'enemy';
+  const { dist, firstStep } = computeSafeReachability(
+    sim,
+    bot,
+    dangerMap,
+    botSlotIndex,
+    allowEnemyEarlyCross
+  );
   const { dist: urgentDist, firstStep: urgentFirstStep } = computeSafeReachability(
     sim,
     bot,
@@ -698,20 +868,29 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     return { moveX: 0, moveZ: 0 };
   };
 
-  // Priority 1: Rescue 'trapped' teammate! (F10)
+  // Priority 1: Rescue 'trapped' teammate! (F10 — human's teammate bot prioritizes rescuing trapped p1 within 2 s!)
   const trappedAllies = [];
   let bestTrappedAlly = null;
+  let bestAllyMetric = Infinity;
   let bestAllySteps = Infinity;
   let bestAllyUseUrgent = false;
   for (let i = 0; i < sim.players.length; i += 1) {
     const p = sim.players[i];
     if (p.id !== bot.id && p.team === bot.team && p.state === PLAYER_STATES.TRAPPED) {
+      // Enemy bots have slow rescue awareness (only notice after 1.5s trapped and if within 2 tiles)
+      if (profile.role === 'enemy' && (p.trapTimer > 3.5 || Math.hypot(p.x - bot.x, p.z - bot.z) > 2.4)) {
+        continue;
+      }
       trappedAllies.push(p);
       const safeD = dist[p.row][p.col];
       const urgD = urgentDist[p.row][p.col];
-      const candidateD = urgD <= 2 ? urgD : safeD;
-      const candidateUrgent = urgD <= 2 && safeD > urgD;
-      if (candidateD < bestAllySteps) {
+      const maxUrgSteps = p.id === 'p1' ? 8 : profile.role === 'enemy' ? 2 : 5;
+      const candidateD = urgD <= maxUrgSteps ? urgD : safeD;
+      const candidateUrgent = urgD <= maxUrgSteps && safeD > urgD;
+      const p1PriorityWeight = p.id === 'p1' ? 0.4 : 1.0;
+      const metric = candidateD * p1PriorityWeight;
+      if (metric < bestAllyMetric) {
+        bestAllyMetric = metric;
         bestAllySteps = candidateD;
         bestTrappedAlly = p;
         bestAllyUseUrgent = candidateUrgent;
@@ -721,7 +900,7 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
   if (
     bestTrappedAlly &&
     bestAllySteps < Infinity &&
-    (minBotDanger === Infinity || bestAllySteps <= 2)
+    (minBotDanger === Infinity || bestAllySteps <= (bestTrappedAlly.id === 'p1' ? 8 : 3))
   ) {
     bot._aiUrgentGoal = true;
     const move = moveTowardReachable(
@@ -746,18 +925,31 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     return { moveX: 0, moveZ: 0, dropBubble: false, useItem: false };
   }
 
-  // Priority 2: Pop 'trapped' opposing rival! (F09)
+  // Priority 2: Pop 'trapped' opposing rival! (F09 — weight popping trapped p1 x1.5, aggressive finish!)
   let bestTrappedEnemy = null;
+  let bestEnemyPopMetric = Infinity;
   let bestEnemyPopSteps = Infinity;
   let bestEnemyUseUrgent = false;
   for (let i = 0; i < sim.players.length; i += 1) {
     const p = sim.players[i];
     if (p.team !== bot.team && p.state === PLAYER_STATES.TRAPPED) {
+      if (
+        profile.role === 'enemy' &&
+        profile.difficulty === 'easy' &&
+        p.id === 'p1' &&
+        p.trapTimer > 4.1 &&
+        Math.hypot(p.x - bot.x, p.z - bot.z) > 2.6
+      ) {
+        continue;
+      }
       const safeD = dist[p.row][p.col];
       const urgD = urgentDist[p.row][p.col];
-      const candidateD = urgD <= 2 ? urgD : safeD;
-      const candidateUrgent = urgD <= 2 && safeD > urgD;
-      if (candidateD < bestEnemyPopSteps) {
+      const candidateD = urgD <= 9 ? urgD : safeD;
+      const candidateUrgent = urgD <= 9 && safeD > urgD;
+      const weight = p.id === 'p1' ? 1 / 1.5 : 1.0;
+      const metric = candidateD * weight;
+      if (metric < bestEnemyPopMetric) {
+        bestEnemyPopMetric = metric;
         bestEnemyPopSteps = candidateD;
         bestTrappedEnemy = p;
         bestEnemyUseUrgent = candidateUrgent;
@@ -767,7 +959,7 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
   if (
     bestTrappedEnemy &&
     bestEnemyPopSteps < Infinity &&
-    (minBotDanger === Infinity || bestEnemyPopSteps <= 2)
+    (minBotDanger === Infinity || bestEnemyPopSteps <= 9)
   ) {
     bot._aiUrgentGoal = true;
     const move = moveTowardReachable(
@@ -781,7 +973,6 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
   }
 
   // Priority 2.5: Kick Torpedo — push adjacent stationary solidified bubble at 10.0 tiles/s down lane into rivals!
-  // Checked before early-fuse step-out so pushing up against the bubble edge never ping-pongs.
   if (minBotDanger > 1.35) {
     const kickMove = tryKickTorpedo(sim, bot, dangerMap);
     if (kickMove) {
@@ -790,8 +981,12 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     }
   }
 
-  // If currently inside an early-fuse lane (> 1.25s left), step out to safety while optionally laying a crossfire pincer bubble!
-  if (minBotDanger < Infinity) {
+  // If currently inside an early-fuse lane, Blue team steps out immediately while Enemy bots only step out
+  // if they dropped their own bubble or the fuse is below 1.15s (allowing human-like offensive pressure).
+  const shouldStepOutEarly =
+    minBotDanger < Infinity &&
+    (profile.role !== 'enemy' || bot.activeBubbles > 0 || minBotDanger <= 1.15);
+  if (shouldStepOutEarly) {
     const move = findEscapeMove(sim, bot, dangerMap);
     let crossfireDrop = false;
     if (bot.activeBubbles < bot.maxBubbles) {
@@ -799,7 +994,7 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
         if (p.team === bot.team || p.state !== PLAYER_STATES.ALIVE || p.invulnTimer > 0.25) {
           return false;
         }
-        if (Math.hypot(p.x - bot.x, p.z - bot.z) <= 2.4) return true;
+        if (Math.hypot(p.x - bot.x, p.z - bot.z) <= 2.8) return true;
         return wouldRayHitTargetCell(
           sim.grid,
           bot.col,
@@ -857,7 +1052,6 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
         if (hitsCarrier && canSafelyDropBubble(sim, bot)) {
           return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
         }
-        // Cut off carrier between carrier and their home base
         const enemyBaseCol = enemyCarrier.team === 0 ? 1 : 13;
         const interceptCol = Math.max(
           1,
@@ -898,7 +1092,6 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
           }
         }
         if (bestBun && bestBunDist < Infinity) {
-          // If contesting the bun with a nearby rival, drop a zoning bubble on the shrine!
           const contestedAtShrine =
             bestBunDist <= 2 &&
             sim.players.some(
@@ -932,7 +1125,18 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
       return { moveX: move.moveX, moveZ: move.moveZ, dropBubble: false, useItem: false };
     }
 
-    if (wouldRayHitBoss(sim, bot.col, bot.row, bot.blastRange) && canSafelyDropBubble(sim, bot)) {
+    // Co-op ally bots (!isHuman) pace their boss bomb drops so an idle P1 cannot be carried in < 60 s,
+    // while autopilot P1 (isHuman === true, 2x damage) attacks at full hero cadence to win in 40–110 s.
+    const bossBombCooldownTicks = bot.isHuman ? 0 : 390;
+    const canBombBossNow =
+      curTick - (bot._lastBossBombTick ?? -(botSlotIndex * 95 + 10)) >= bossBombCooldownTicks;
+
+    if (
+      canBombBossNow &&
+      wouldRayHitBoss(sim, bot.col, bot.row, bot.blastRange) &&
+      canSafelyDropBubble(sim, bot)
+    ) {
+      bot._lastBossBombTick = curTick;
       return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
     }
 
@@ -959,9 +1163,19 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     }
   }
 
-  // Priority 4: Collect nearby safe pickups/mounts (aggressive gear-up when maxBubbles < 4 or blastRange < 4)
-  const needsGear = bot.maxBubbles < 4 || bot.blastRange < 4;
-  const pickupMaxSteps = needsGear ? 9 : 5;
+  // Distance to nearest alive enemy (never farm soft blocks when an enemy is within 6 tiles!)
+  let minEnemyDist = Infinity;
+  for (let i = 0; i < sim.players.length; i += 1) {
+    const p = sim.players[i];
+    if (p.team !== bot.team && p.state === PLAYER_STATES.ALIVE) {
+      const ed = Math.hypot(p.x - bot.x, p.z - bot.z);
+      if (ed < minEnemyDist) minEnemyDist = ed;
+    }
+  }
+  const enemyWithinSixTiles = minEnemyDist <= 6.0;
+
+  // Priority 4: Collect nearby safe pickups/mounts (only very close pickups when an enemy is within 6 tiles)
+  const pickupMaxSteps = enemyWithinSixTiles ? 2 : 5;
   let nearestPickup = null;
   let nearestPickupSteps = pickupMaxSteps + 1;
   for (let i = 0; i < sim.pickups.length; i += 1) {
@@ -982,103 +1196,72 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     return { moveX: move.moveX, moveZ: move.moveZ, dropBubble: false, useItem: false };
   }
 
-  // Priority 4.5: Early-game soft-block gear-up in classic_2v2 when under-geared & no enemy right next to us
-  let minEnemyDist = Infinity;
-  for (let i = 0; i < sim.players.length; i += 1) {
-    const p = sim.players[i];
-    if (p.team !== bot.team && p.state === PLAYER_STATES.ALIVE) {
-      const ed = Math.hypot(p.x - bot.x, p.z - bot.z);
-      if (ed < minEnemyDist) minEnemyDist = ed;
-    }
-  }
-  const curTick = sim.tick || 0;
-  if (minEnemyDist <= 3.9) {
-    bot._aiFarmSuppressUntil = curTick + 30;
-  } else if (minEnemyDist >= 4.9 && curTick >= (bot._aiFarmSuppressUntil || 0)) {
-    bot._aiFarmSuppressUntil = 0;
-  }
-  const enemyVeryClose = curTick < (bot._aiFarmSuppressUntil || 0) || minEnemyDist <= 3.9;
-  if (sim.modeId === 'classic_2v2' && needsGear && !enemyVeryClose) {
-    let bestFarmTile = null;
-    let bestFarmScore = -Infinity;
-    for (let r = 0; r < GRID_ROWS; r += 1) {
-      for (let c = 0; c < GRID_COLS; c += 1) {
-        if (dist[r][c] > 5) continue;
-        let adjSoft = 0;
-        for (let di = 0; di < CARDINAL_DIRS.length; di += 1) {
-          const nc = c + CARDINAL_DIRS[di].dc;
-          const nr = r + CARDINAL_DIRS[di].dr;
-          if (isInBounds(nc, nr) && sim.grid[nr][nc] === TILE_TYPE.SOFT_BLOCK) {
-            adjSoft += 1;
-          }
-        }
-        if (adjSoft <= 0) continue;
-        const score = adjSoft * 2.5 - dist[r][c] - (Math.abs(c - 7) + Math.abs(r - 6)) * 0.12;
-        if (score > bestFarmScore) {
-          bestFarmScore = score;
-          bestFarmTile = { col: c, row: r };
-        }
-      }
-    }
-    if (bestFarmTile) {
-      if (
-        bestFarmTile.col === bot.col &&
-        bestFarmTile.row === bot.row &&
-        canSafelyDropBubble(sim, bot)
-      ) {
-        return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
-      }
-      const move = moveTowardReachable(bestFarmTile.col, bestFarmTile.row);
-      return { moveX: move.moveX, moveZ: move.moveZ, dropBubble: false, useItem: false };
-    }
-  }
+  const isEasyEnemy = profile.role === 'enemy' && profile.difficulty === 'easy';
+  const easyBombReady =
+    !isEasyEnemy || curTick - (bot._lastEasyBombTick ?? -200) >= 108;
 
   // Priority 5B: Bomb an 'alive' enemy in unobstructed blast sight, pincer escape neighbor, or close-quarters boxing range!
-  const hitsEnemyOrPincerNow = sim.players.some((p) => {
-    if (p.team === bot.team || p.state !== PLAYER_STATES.ALIVE || p.invulnTimer > 0.25) {
-      return false;
-    }
-    if (Math.hypot(p.x - bot.x, p.z - bot.z) <= 2.65) return true;
-    const enemyAlreadyThreatened = dangerMap[p.row][p.col] < Infinity;
-    return wouldRayHitTargetCell(sim.grid, bot.col, bot.row, bot.blastRange, (tc, tr) => {
-      if (tc === p.col && tr === p.row) return true;
-      if (enemyAlreadyThreatened && Math.abs(tc - p.col) + Math.abs(tr - p.row) === 1) {
-        return dangerMap[tr][tc] === Infinity;
+  const hitsEnemyOrPincerNow =
+    easyBombReady &&
+    sim.players.some((p) => {
+      if (p.team === bot.team || p.state !== PLAYER_STATES.ALIVE || p.invulnTimer > 0.25) {
+        return false;
       }
-      return false;
+      if (isEasyEnemy && p.id === 'p1' && curTick < 1500 && p.col <= 2 && p.row <= 2) {
+        return false;
+      }
+      const distToEnemy = Math.hypot(p.x - bot.x, p.z - bot.z);
+      if (distToEnemy <= (isEasyEnemy ? 2.1 : 2.8)) return true;
+      const enemyAlreadyThreatened = dangerMap[p.row][p.col] < Infinity;
+      return wouldRayHitTargetCell(sim.grid, bot.col, bot.row, bot.blastRange, (tc, tr) => {
+        if (tc === p.col && tr === p.row) return true;
+        if (
+          !isEasyEnemy &&
+          (enemyAlreadyThreatened || distToEnemy <= 3.8) &&
+          Math.abs(tc - p.col) + Math.abs(tr - p.row) === 1
+        ) {
+          return dangerMap[tr][tc] === Infinity;
+        }
+        return false;
+      });
     });
-  });
   if (hitsEnemyOrPincerNow && canSafelyDropBubble(sim, bot)) {
+    bot._lastEasyBombTick = curTick;
     return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
   }
 
   // Priority 6: Pursue reachable 'alive' enemy via direct & pincer escape-cutoff strike tiles!
+  // On normal difficulty, enemies weight hunting human `p1` by x1.5; on easy, enemies focus bot1/mid-field for the first 25s.
   let bestEnemyStrike = null;
   let bestEnemyStrikeMetric = Infinity;
   let closestReachableEnemy = null;
-  let closestEnemyPathSteps = Infinity;
+  let closestEnemyPathMetric = Infinity;
 
   for (let i = 0; i < sim.players.length; i += 1) {
     const p = sim.players[i];
     if (p.team === bot.team || p.state !== PLAYER_STATES.ALIVE) continue;
+    if (isEasyEnemy && p.id === 'p1' && curTick < 1500 && p.col <= 2 && p.row <= 2) {
+      continue;
+    }
+    const huntMultiplier =
+      p.id === 'p1' ? (isEasyEnemy ? 0.72 : 1.5) : 1.0;
     const carrierBonus = p.carryingBun ? -6 : 0;
     const enemyAlreadyThreatened = dangerMap[p.row][p.col] < Infinity;
 
-    // Candidate target cells for this enemy: their tile + their safe adjacent escape tiles!
     const targetCells = [{ col: p.col, row: p.row, bonus: 0 }];
     for (let di = 0; di < CARDINAL_DIRS.length; di += 1) {
       const ec = p.col + CARDINAL_DIRS[di].dc;
       const er = p.row + CARDINAL_DIRS[di].dr;
       if (!isInBounds(ec, er)) continue;
-      if (dist[er][ec] + carrierBonus < closestEnemyPathSteps) {
-        closestEnemyPathSteps = dist[er][ec] + carrierBonus;
+      const pathMetric = (dist[er][ec] + carrierBonus) / huntMultiplier;
+      if (pathMetric < closestEnemyPathMetric) {
+        closestEnemyPathMetric = pathMetric;
         closestReachableEnemy = { col: ec, row: er };
       }
       const cell = sim.grid[er][ec];
       if (cell !== TILE_TYPE.HARD_WALL && cell !== TILE_TYPE.SOFT_BLOCK) {
-        // High pincer bonus when cutting off a safe escape neighbor of an already-threatened rival!
         const pincerBonus =
-          enemyAlreadyThreatened && dangerMap[er][ec] === Infinity ? -4.5 : 0.6;
+          enemyAlreadyThreatened && dangerMap[er][ec] === Infinity ? -4.5 : 0.4;
         targetCells.push({ col: ec, row: er, bonus: pincerBonus });
       }
     }
@@ -1100,12 +1283,13 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
           );
           if (!hitsTgt) continue;
 
-          const metric =
+          const rawMetric =
             dist[r][c] +
             manhattan * 0.22 +
             carrierBonus +
             tgt.bonus +
             ((c * 3 + r * 5 + botSlotIndex) % 4) * 0.14;
+          const metric = rawMetric / huntMultiplier;
           if (metric < bestEnemyStrikeMetric) {
             bestEnemyStrikeMetric = metric;
             bestEnemyStrike = { col: c, row: r };
@@ -1123,13 +1307,16 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
 
   if (bestEnemyStrike) {
     if (
+      easyBombReady &&
       bestEnemyStrike.col === bot.col &&
       bestEnemyStrike.row === bot.row &&
       canSafelyDropBubble(sim, bot)
     ) {
+      bot._lastEasyBombTick = curTick;
       return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
     }
     const spareBomb =
+      !enemyWithinSixTiles &&
       adjacentSoftNow &&
       bot.maxBubbles >= 3 &&
       bot.activeBubbles < bot.maxBubbles - 1 &&
@@ -1138,8 +1325,9 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     return { moveX: move.moveX, moveZ: move.moveZ, dropBubble: spareBomb, useItem: false };
   }
 
-  if (closestReachableEnemy && closestEnemyPathSteps < Infinity) {
+  if (closestReachableEnemy && closestEnemyPathMetric < Infinity) {
     const spareBomb =
+      !enemyWithinSixTiles &&
       adjacentSoftNow &&
       bot.maxBubbles >= 2 &&
       bot.activeBubbles < bot.maxBubbles - 1 &&
@@ -1148,44 +1336,52 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
     return { moveX: move.moveX, moveZ: move.moveZ, dropBubble: spareBomb, useItem: false };
   }
 
-  // Priority 7: Demolish remaining SOFT_BLOCKs toward enemies/center!
-  if (adjacentSoftNow && canSafelyDropBubble(sim, bot)) {
-    return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
-  }
+  // Priority 7: Breach SOFT_BLOCKs directly along the shortest path toward enemies (weighting p1 x1.5)!
+  const breachCost = computeEnemyBreachCostMap(sim, bot);
+  let bestBreachTile = null;
+  let bestBreachScore = Infinity;
 
-  let bestDemoTile = null;
-  let bestDemoScore = -Infinity;
   for (let r = 0; r < GRID_ROWS; r += 1) {
     for (let c = 0; c < GRID_COLS; c += 1) {
       if (dist[r][c] === Infinity) continue;
-      let adjSoft = 0;
+      let minAdjSoftBreachCost = Infinity;
+      let adjSoftCount = 0;
       for (let di = 0; di < CARDINAL_DIRS.length; di += 1) {
         const nc = c + CARDINAL_DIRS[di].dc;
         const nr = r + CARDINAL_DIRS[di].dr;
         if (isInBounds(nc, nr) && sim.grid[nr][nc] === TILE_TYPE.SOFT_BLOCK) {
-          adjSoft += 1;
+          adjSoftCount += 1;
+          if (breachCost[nr][nc] < minAdjSoftBreachCost) {
+            minAdjSoftBreachCost = breachCost[nr][nc];
+          }
         }
       }
-      if (adjSoft <= 0) continue;
-      const centerBias = -(Math.abs(c - 7) + Math.abs(r - 6)) * 0.15;
-      const score = adjSoft * 2.2 - dist[r][c] + centerBias;
-      if (score > bestDemoScore) {
-        bestDemoScore = score;
-        bestDemoTile = { col: c, row: r };
+      if (adjSoftCount <= 0) continue;
+      const score =
+        dist[r][c] * 1.15 +
+        (minAdjSoftBreachCost < Infinity ? minAdjSoftBreachCost : (Math.abs(c - 7) + Math.abs(r - 6))) -
+        adjSoftCount * 0.35;
+      if (score < bestBreachScore) {
+        bestBreachScore = score;
+        bestBreachTile = { col: c, row: r };
       }
     }
   }
 
-  if (bestDemoTile) {
+  if (bestBreachTile) {
     if (
-      bestDemoTile.col === bot.col &&
-      bestDemoTile.row === bot.row &&
+      bestBreachTile.col === bot.col &&
+      bestBreachTile.row === bot.row &&
       canSafelyDropBubble(sim, bot)
     ) {
       return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
     }
-    const move = moveTowardReachable(bestDemoTile.col, bestDemoTile.row);
+    const move = moveTowardReachable(bestBreachTile.col, bestBreachTile.row);
     return { moveX: move.moveX, moveZ: move.moveZ, dropBubble: false, useItem: false };
+  }
+
+  if (adjacentSoftNow && canSafelyDropBubble(sim, bot)) {
+    return { moveX: 0, moveZ: 0, dropBubble: true, useItem: false };
   }
 
   if (dist[6][7] < Infinity && (bot.col !== 7 || bot.row !== 6)) {
@@ -1201,6 +1397,7 @@ function computeRawBotIntent(sim, bot, botSlotIndex = 0) {
  * applying a short safe-navigation commit window so equal-score goal switches never dither.
  */
 export function computeBotIntent(sim, bot, botSlotIndex = 0) {
+  const prevSteerCell = bot ? bot._aiLastSteerCell : null;
   const raw = computeRawBotIntent(sim, bot, botSlotIndex);
   if (!bot || bot.state !== PLAYER_STATES.ALIVE) {
     if (bot) {
@@ -1213,7 +1410,18 @@ export function computeBotIntent(sim, bot, botSlotIndex = 0) {
 
   const dangerMap = bot._aiLastDangerMap;
   const minDanger = bot._aiLastMinDanger;
-  if (minDanger < Infinity || raw.dropBubble || raw.useItem || bot._aiUrgentGoal || !dangerMap) {
+  const urgentThreshold =
+    bot._aiProfile?.role === 'enemy'
+      ? bot._aiProfile?.difficulty === 'easy'
+        ? 0.52
+        : 0.68
+      : 1.25;
+  if (
+    minDanger <= urgentThreshold ||
+    raw.dropBubble ||
+    raw.useItem ||
+    !dangerMap
+  ) {
     bot._aiCommitTicks = 0;
     bot._aiLastSafeMoveX = raw.moveX;
     bot._aiLastSafeMoveZ = raw.moveZ;
@@ -1225,7 +1433,7 @@ export function computeBotIntent(sim, bot, botSlotIndex = 0) {
     const stillValid =
       isInBounds(col, row) &&
       isCellTraversableForBot(sim, bot, col, row) &&
-      dangerMap[row][col] === Infinity &&
+      dangerMap[row][col] > urgentThreshold &&
       Math.hypot(col + 0.5 - bot.x, row + 0.5 - bot.z) > 0.08;
     if (stillValid) {
       bot._aiCommitTicks -= 1;
@@ -1240,9 +1448,25 @@ export function computeBotIntent(sim, bot, botSlotIndex = 0) {
   const prevX = bot._aiLastSafeMoveX || 0;
   const prevZ = bot._aiLastSafeMoveZ || 0;
   const reversed = raw.moveX * prevX < -0.05 || raw.moveZ * prevZ < -0.05;
-  if (reversed && bot._aiLastSteerCell) {
-    bot._aiCommitCell = { col: bot._aiLastSteerCell.col, row: bot._aiLastSteerCell.row };
-    bot._aiCommitTicks = 8;
+  if (reversed) {
+    if (
+      prevSteerCell &&
+      isInBounds(prevSteerCell.col, prevSteerCell.row) &&
+      isCellTraversableForBot(sim, bot, prevSteerCell.col, prevSteerCell.row) &&
+      dangerMap[prevSteerCell.row][prevSteerCell.col] > urgentThreshold &&
+      Math.hypot(prevSteerCell.col + 0.5 - bot.x, prevSteerCell.row + 0.5 - bot.z) > 0.08
+    ) {
+      bot._aiCommitCell = { col: prevSteerCell.col, row: prevSteerCell.row };
+      bot._aiCommitTicks = 12;
+      const held = steerToCell(bot, prevSteerCell.col, prevSteerCell.row);
+      bot._aiLastSafeMoveX = held.moveX;
+      bot._aiLastSafeMoveZ = held.moveZ;
+      return { moveX: held.moveX, moveZ: held.moveZ, dropBubble: false, useItem: false };
+    }
+    if (bot._aiLastSteerCell) {
+      bot._aiCommitCell = { col: bot._aiLastSteerCell.col, row: bot._aiLastSteerCell.row };
+      bot._aiCommitTicks = 12;
+    }
   }
 
   bot._aiLastSafeMoveX = raw.moveX;

@@ -10,7 +10,10 @@
 import {
   BLAST_HURT_HALF_EXTENT,
   BLAST_LINGER_SEC,
+  BOSS_BOT_HIT_DAMAGE,
   BOSS_HIT_INVULN_SEC,
+  BOSS_HUMAN_HIT_DAMAGE,
+  BOSS_PHASE2_HP,
   CARDINAL_DIRS,
   DISMOUNT_INVULN_SEC,
   EVENT_TYPES,
@@ -228,12 +231,13 @@ export function stepBubblesAndBlasts(sim, dt) {
       });
 
       sim.events.push({
-        type: isChain ? EVENT_TYPES.CHAIN_EXPLODE : EVENT_TYPES.EXPLODE,
+        type: isChain || detonatedIds.size > 1 ? EVENT_TYPES.CHAIN_EXPLODE : EVENT_TYPES.EXPLODE,
         bubbleId: b.id,
         ownerId: b.ownerId,
         col: originCol,
         row: originRow,
         range: b.blastRange,
+        chainCount: detonatedIds.size,
       });
     }
 
@@ -445,17 +449,25 @@ export function resolveCombatAndInteractions(
       }
 
       if (bossAttackerId) {
-        sim.boss.hp = Math.max(0, sim.boss.hp - 1);
+        const attacker = sim.playersById ? sim.playersById.get(bossAttackerId) : null;
+        const isHumanHit = Boolean(attacker && attacker.isHuman);
+        const damage = isHumanHit ? BOSS_HUMAN_HIT_DAMAGE : BOSS_BOT_HIT_DAMAGE;
+        const prevHp = sim.boss.hp;
+        sim.boss.hp = Math.max(0, sim.boss.hp - damage);
         sim.boss.invulnTimer = BOSS_HIT_INVULN_SEC;
-        sim.boss.phase = sim.boss.hp <= Math.floor(sim.boss.maxHp * 0.5) ? 2 : 1;
+        sim.boss.phase = sim.boss.hp <= BOSS_PHASE2_HP ? 2 : 1;
         sim.events.push({
           type: EVENT_TYPES.BOSS_HIT,
           hp: sim.boss.hp,
           maxHp: sim.boss.maxHp,
+          damage,
+          isHumanHit,
           attackerId: bossAttackerId,
+          x: sim.boss.x,
+          z: sim.boss.z,
         });
         if (typeof onBossDamaged === 'function') {
-          onBossDamaged(sim, bossAttackerId);
+          onBossDamaged(sim, bossAttackerId, prevHp);
         }
       }
     }

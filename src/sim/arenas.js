@@ -299,6 +299,21 @@ export function generateArena(arenaId, modeId, rng) {
     }
     // 2x2 Boss top-left at (6, 5) -> occupies (6,5), (7,5), (6,6), (7,6), center at (7.0, 6.0)
     bossSpawn = { col: 6, row: 5 };
+  } else if (modeId === 'classic_2v2') {
+    // Carve fast skirmish engagement avenues along top (row 1), center (row 6), bottom (row 11),
+    // and mid-column (col 7), keeping 1 destructible gate per flank so rivals clash within ~10s!
+    for (const r of [1, 6, 11]) {
+      for (let c = 2; c <= 12; c += 1) {
+        if (grid[r][c] === TILE_TYPE.SOFT_BLOCK) {
+          grid[r][c] = c === 7 ? TILE_TYPE.SOFT_BLOCK : TILE_TYPE.EMPTY;
+        }
+      }
+    }
+    for (let r = 2; r <= 10; r += 1) {
+      if (grid[r][7] === TILE_TYPE.SOFT_BLOCK && r !== 6) {
+        grid[r][7] = TILE_TYPE.EMPTY;
+      }
+    }
   }
 
   for (const sp of spawns) {

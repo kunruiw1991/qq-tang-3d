@@ -162,7 +162,7 @@ function createPlacedSugarBubbleMesh(isBossBomb = false) {
 function createWaterTrapBubbleMesh() {
   const g = new THREE.Group();
   const centerPivot = new THREE.Group();
-  centerPivot.position.y = 0.74;
+  centerPivot.position.y = 0.88;
   g.add(centerPivot);
 
   // BackSide cyan rim halo
@@ -170,14 +170,14 @@ function createWaterTrapBubbleMesh() {
     color: 0x38bdf8,
     side: THREE.BackSide,
     transparent: true,
-    opacity: 0.20,
+    opacity: 0.22,
     depthWrite: false,
   });
-  const rimHalo = new THREE.Mesh(new THREE.SphereGeometry(0.79, 26, 20), rimMat);
+  const rimHalo = new THREE.Mesh(new THREE.SphereGeometry(0.95, 26, 20), rimMat);
   rimHalo.renderOrder = 3;
   centerPivot.add(rimHalo);
 
-  // Crystal Fresnel outer water sphere
+  // Crystal Fresnel outer water sphere (scaled to comfortably encase 1.35x character rig!)
   const shellMat = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(0x60d5ff),
     emissive: new THREE.Color(0x0ea5e9),
@@ -192,7 +192,7 @@ function createWaterTrapBubbleMesh() {
     iridescence: 0.35,
     envMapIntensity: 2.0,
   });
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(0.76, 32, 24), shellMat);
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(0.92, 32, 24), shellMat);
   shell.renderOrder = 4;
   centerPivot.add(shell);
 
@@ -230,11 +230,24 @@ function createWaterTrapBubbleMesh() {
   }
   centerPivot.add(orbitGroup);
 
+  // Shrinking 3D ring timer around trapped player's water bubble
+  const timerRingMat = new THREE.MeshBasicMaterial({
+    color: 0xfacc15,
+    side: THREE.DoubleSide,
+    transparent: false,
+  });
+  const timerRing = new THREE.Mesh(new THREE.TorusGeometry(0.98, 0.055, 10, 36), timerRingMat);
+  timerRing.rotation.x = Math.PI * 0.5;
+  timerRing.position.y = 0.08;
+  g.add(timerRing);
+
   g.userData = {
     centerPivot,
     shellMat,
     rimMat,
     orbitGroup,
+    timerRing,
+    timerRingMat,
   };
   return g;
 }
@@ -796,7 +809,7 @@ export class EntityVisualManager {
 
     this._syncBubbles(snapshot.bubbles || [], timeSec);
     this._syncPlayerAttachments(snapshot.players || [], timeSec, snapshot.grid || null);
-    this._syncBlasts(snapshot.blasts || [], timeSec);
+    this._syncBlasts(snapshot.blasts || [], timeSec, snapshot.players || []);
     this._syncPickups(snapshot.pickups || [], timeSec);
     this._syncLooseBuns(snapshot.looseBuns || [], timeSec);
     const events = Array.isArray(eventsOverride) ? eventsOverride : snapshot.events || [];
@@ -829,8 +842,9 @@ export class EntityVisualManager {
       // Accelerating squash-and-stretch fuse pulse!
       const fuseRatio = Math.max(0, Math.min(1, b.fuseRemaining / BUBBLE_FUSE_SEC));
       const urgency = 1.0 - fuseRatio;
-      const freq = 7.0 + urgency * urgency * 18.0;
-      const amp = 0.075 + urgency * 0.065;
+      const inCriticalWarning = b.fuseRemaining <= 0.80;
+      const freq = inCriticalWarning ? 32.0 : 7.0 + urgency * urgency * 18.0;
+      const amp = inCriticalWarning ? 0.16 : 0.075 + urgency * 0.065;
       const wave = Math.sin(timeSec * freq + b.id * 1.3);
 
       const ud = mesh.userData;
@@ -839,12 +853,12 @@ export class EntityVisualManager {
       ud.coreGroup.rotation.z = timeSec * 1.8;
 
       if (!ud.isBossBomb) {
-        if (b.fuseRemaining < 0.85) {
-          // Warm pink-gold warning flash right before detonation!
-          const flash = 0.5 + 0.5 * Math.sin(timeSec * 28);
-          ud.shellMat.color.setHex(flash > 0.5 ? 0xff7597 : 0x38bdf8);
-          ud.shellMat.emissive.setHex(0xf43f5e);
-          ud.shellMat.emissiveIntensity = 0.16 + flash * 0.34;
+        if (inCriticalWarning) {
+          // Vivid crimson-red pulse in the last 0.8s before detonation!
+          const flash = 0.5 + 0.5 * Math.sin(timeSec * 34);
+          ud.shellMat.color.setHex(flash > 0.45 ? 0xff1744 : 0xffffff);
+          ud.shellMat.emissive.setHex(0xff1744);
+          ud.shellMat.emissiveIntensity = 0.38 + flash * 0.52;
         } else {
           ud.shellMat.color.setHex(0x38bdf8);
           ud.shellMat.emissive.setHex(0x0284c7);
@@ -893,6 +907,12 @@ export class EntityVisualManager {
         const wob = Math.sin(timeSec * wobFreq + i);
         ud.centerPivot.scale.set(1.0 + wob * 0.055, 1.0 - wob * 0.055, 1.0 + wob * 0.055);
         ud.orbitGroup.rotation.y = timeSec * 2.4;
+
+        if (ud.timerRing && ud.timerRingMat) {
+          const timerFrac = Math.max(0.18, Math.min(1.0, (p.trapTimer || 0) / 5.5));
+          ud.timerRing.scale.set(timerFrac, timerFrac, 1);
+          ud.timerRingMat.color.setHex(nearBurst ? 0xef4444 : 0xfacc15);
+        }
 
         if (nearBurst) {
           const urgent = 0.5 + 0.5 * Math.sin(timeSec * 24);
@@ -1032,7 +1052,7 @@ export class EntityVisualManager {
     }
   }
 
-  _syncBlasts(blasts, timeSec) {
+  _syncBlasts(blasts, timeSec, players = []) {
     const activeIds = new Set();
 
     for (let i = 0; i < blasts.length; i += 1) {
@@ -1041,21 +1061,28 @@ export class EntityVisualManager {
 
       let group = this.blastsById.get(bl.id);
       if (!group) {
-        group = this._buildBlastWaveMesh(bl);
+        group = this._buildBlastWaveMesh(bl, players);
         this.blastGroup.add(group);
         this.blastsById.set(bl.id, group);
       }
 
+      const elapsed = Math.max(0, BLAST_LINGER_SEC - bl.remainingSec);
       const lifeRatio = Math.max(0.05, Math.min(1.0, bl.remainingSec / BLAST_LINGER_SEC));
-      // Rapid swell at start, smooth taper at end
-      const thicknessScale =
-        lifeRatio > 0.75
-          ? 0.75 + ((1.0 - lifeRatio) / 0.25) * 0.35
-          : Math.pow(lifeRatio / 0.75, 0.55);
 
-      group.userData.beamContainer.scale.y = Math.max(0.2, thicknessScale);
-      group.userData.outerMat.opacity = 0.82 * Math.min(1, lifeRatio * 1.4);
-      group.userData.coreMat.opacity = 0.96 * Math.min(1, lifeRatio * 1.5);
+      // Punchy 120ms scale-pop at detonation, then smooth taper
+      let popScale = 1.0;
+      if (elapsed <= 0.12) {
+        popScale = 1.0 + Math.sin((elapsed / 0.12) * Math.PI) * 0.34;
+      } else {
+        popScale = Math.max(0.28, Math.pow(lifeRatio, 0.5));
+      }
+
+      group.userData.beamContainer.scale.set(
+        Math.max(0.5, Math.min(1.34, popScale)),
+        Math.max(0.25, popScale * 1.12),
+        Math.max(0.5, Math.min(1.34, popScale))
+      );
+      group.userData.outerMat.opacity = 0.94 * Math.min(1, lifeRatio * 1.5);
       if (group.userData.crown) {
         group.userData.crown.rotation.y = timeSec * 8.0;
       }
@@ -1070,24 +1097,37 @@ export class EntityVisualManager {
     }
   }
 
-  _buildBlastWaveMesh(bl) {
+  _buildBlastWaveMesh(bl, players = []) {
     const isBoss = bl.ownerId === 'boss';
+    const ownerPlayer = Array.isArray(players)
+      ? players.find((p) => p.id === bl.ownerId)
+      : null;
+    const isRedTeam =
+      !isBoss &&
+      (ownerPlayer ? ownerPlayer.team === 1 : bl.ownerId === 'bot2' || bl.ownerId === 'bot3');
+    const teamRingColor = isBoss ? 0xff6d00 : isRedTeam ? 0xff1744 : 0x0066ff;
+
     const root = new THREE.Group();
     const beamContainer = new THREE.Group();
-    beamContainer.position.y = 0.36;
+    beamContainer.position.y = 0.38;
     root.add(beamContainer);
 
+    // Saturated team-colored outer shell + ring
     const outerMat = new THREE.MeshBasicMaterial({
-      color: isBoss ? 0xf97316 : 0x0284c7,
+      color: teamRingColor,
       transparent: true,
-      opacity: 0.82,
+      opacity: 0.94,
       depthWrite: false,
     });
+    // Opaque white-hot core (`transparent: false` so it reads unmistakably on every floor!)
     const coreMat = new THREE.MeshBasicMaterial({
-      color: isBoss ? 0xfef08a : 0xa5f3fc,
-      transparent: true,
-      opacity: 0.96,
-      depthWrite: false,
+      color: 0xffffff,
+      transparent: false,
+    });
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: teamRingColor,
+      side: THREE.DoubleSide,
+      transparent: false,
     });
 
     const tileSet = new Set();
@@ -1103,9 +1143,10 @@ export class EntityVisualManager {
 
       if (t.dir === 'center') {
         const dome = new THREE.Mesh(this._blastDomeGeo, outerMat);
+        dome.scale.setScalar(1.12);
         dome.position.set(wx, 0.02, wz);
         const coreDome = new THREE.Mesh(this._blastDomeGeo, coreMat);
-        coreDome.scale.setScalar(0.62);
+        coreDome.scale.setScalar(0.74);
         coreDome.position.set(wx, 0.02, wz);
         beamContainer.add(dome, coreDome);
 
@@ -1119,6 +1160,7 @@ export class EntityVisualManager {
             bridge.position.set(wx + dc * 0.5, 0, wz + dr * 0.5);
             bridge.rotation.set(rotX, 0, rotZ);
             const bridgeCore = new THREE.Mesh(this._blastCoreGeo, coreMat);
+            bridgeCore.scale.set(1.25, 1, 1.25);
             bridgeCore.position.copy(bridge.position);
             bridgeCore.rotation.copy(bridge.rotation);
             beamContainer.add(bridge, bridgeCore);
@@ -1135,11 +1177,13 @@ export class EntityVisualManager {
         // Directional cardinal water/syrup jet segment!
         const isHorizontal = t.dir === 'east' || t.dir === 'west';
         const seg = new THREE.Mesh(this._blastBeamGeo, outerMat);
+        seg.scale.set(1.12, 1, 1.12);
         seg.position.set(wx, 0, wz);
         if (isHorizontal) seg.rotation.z = Math.PI * 0.5;
         else seg.rotation.x = Math.PI * 0.5;
 
         const core = new THREE.Mesh(this._blastCoreGeo, coreMat);
+        core.scale.set(1.32, 1, 1.32);
         core.position.set(wx, 0, wz);
         core.rotation.copy(seg.rotation);
         beamContainer.add(seg, core);
@@ -1149,20 +1193,20 @@ export class EntityVisualManager {
         const stepR = t.dir === 'south' ? 1 : t.dir === 'north' ? -1 : 0;
         if (!tileSet.has(`${t.col + stepC},${t.row + stepR}`)) {
           const cap = new THREE.Mesh(this._blastDomeGeo, coreMat);
-          cap.scale.setScalar(0.76);
+          cap.scale.setScalar(0.82);
           cap.position.set(wx + stepC * 0.36, 0, wz + stepR * 0.36);
           beamContainer.add(cap);
         }
       }
 
-      // Ground splash ring under every blast tile
-      const ring = new THREE.Mesh(this._blastRingGeo, coreMat);
+      // Saturated team-colored ground splash ring under every blast tile
+      const ring = new THREE.Mesh(this._blastRingGeo, ringMat);
       ring.rotation.x = -Math.PI * 0.5;
       ring.position.set(wx, 0.025, wz);
       root.add(ring);
     }
 
-    root.userData = { beamContainer, outerMat, coreMat, crown };
+    root.userData = { beamContainer, outerMat, coreMat, ringMat, crown };
     return root;
   }
 
@@ -1248,10 +1292,15 @@ export class EntityVisualManager {
       } else if (
         ev.type === EVENT_TYPES.SHIELD_BREAK ||
         ev.type === EVENT_TYPES.MOUNT_BREAK ||
-        ev.type === EVENT_TYPES.BUN_SCORE
+        ev.type === EVENT_TYPES.BUN_SCORE ||
+        ev.type === EVENT_TYPES.PICKUP ||
+        ev.type === EVENT_TYPES.BUN_PICKUP
       ) {
-        const pos = findPlayerWorld(ev.playerId);
-        if (pos) this._spawnDropletBurst(pos[0], 0.6, pos[1], 0xfacc15, 8);
+        const pos = findPlayerWorld(ev.playerId) || [
+          colToWorldX(ev.col ?? 7),
+          rowToWorldZ(ev.row ?? 6),
+        ];
+        this._spawnDropletBurst(pos[0], 0.6, pos[1], 0xfacc15, 8);
       }
     }
   }

@@ -24,6 +24,8 @@ import {
   GRID_ROWS,
   SCREEN_IDS,
   TILE_TYPE,
+  tileToWorldX,
+  tileToWorldZ,
 } from '../contracts/constants.js';
 import {
   configureRendererPipeline,
@@ -275,7 +277,13 @@ export class Renderer3D {
     this.arenaManager.clearDebris();
     this.cameraRig.shakeSec = 0;
     this.cameraRig.shakeAmp = 0;
+    this.cameraRig.lastShakeAmp = 0;
     this.cameraRig.orbitPhase = 0;
+    const p1 = snapshot?.players?.find((p) => p.id === 'p1') || snapshot?.players?.[0];
+    this.cameraRig.resetFollowTarget(
+      p1 ? tileToWorldX(p1.x) : 0,
+      p1 ? tileToWorldZ(p1.z) : 0
+    );
     this.cameraRig.updateFraming();
     for (const entry of this.characterRigsById.values()) {
       entry.rig.initializedPose = false;
@@ -397,12 +405,25 @@ export class Renderer3D {
     } else if (snap) {
       // Active Gameplay ('playing' | 'paused')
       const tick = typeof snap.tick === 'number' ? snap.tick : 0;
+      const matchElapsedSec = Math.max(0, tick / 60);
       const allowBreakBurst =
         tick > 2 && this._lastMatchTick >= 0 && tick >= this._lastMatchTick;
       this._applyThemePalette(snap.arenaId);
       this.arenaManager.sync(snap.arenaId, snap.grid, this.elapsedSec, dt, allowBreakBurst);
       this._lastMatchTick = tick;
-      this._syncMatchPlayers(snap.players || [], dt);
+
+      const p1 = (snap.players || []).find((p) => p.id === 'p1') || snap.players?.[0] || null;
+      if (p1 && this._lastFollowSyncTick !== tick) {
+        this._lastFollowSyncTick = tick;
+        this.cameraRig.updateFollowTarget(
+          tileToWorldX(p1.x),
+          tileToWorldZ(p1.z),
+          dt || 1 / 60,
+          tick <= 1
+        );
+      }
+
+      this._syncMatchPlayers(snap.players || [], dt, matchElapsedSec);
 
       const events = Array.isArray(uiState?.pendingEvents)
         ? uiState.pendingEvents
@@ -410,12 +431,25 @@ export class Renderer3D {
       this.entityManager.sync(snap, this.elapsedSec, dt, events);
       this.bossManager.sync(snap.boss || null, this.elapsedSec, dt);
 
-      // Subtle camera shake on chain explosion or boss attack
+      // Camera shake: 0.40 amp for 0.22s on chain explosions / KOs / boss attacks; 0.25 amp on own/nearby blast
       for (let i = 0; i < events.length; i += 1) {
-        const t = events[i].type;
-        if (t === EVENT_TYPES.CHAIN_EXPLODE || t === EVENT_TYPES.BOSS_ATTACK) {
-          this.cameraRig.triggerImpulse(0.11, 0.16);
-          break;
+        const ev = events[i];
+        const t = ev.type;
+        if (
+          t === EVENT_TYPES.CHAIN_EXPLODE ||
+          t === EVENT_TYPES.BOSS_ATTACK ||
+          t === EVENT_TYPES.POP
+        ) {
+          this.cameraRig.triggerImpulse(0.40, 0.22);
+        } else if (t === EVENT_TYPES.EXPLODE) {
+          const isOwnOrNearP1 =
+            ev.ownerId === 'p1' ||
+            (p1 && Math.hypot((ev.col ?? 7) + 0.5 - p1.x, (ev.row ?? 6) + 0.5 - p1.z) <= 6.5);
+          if (isOwnOrNearP1) {
+            this.cameraRig.triggerImpulse(0.25, 0.22);
+          } else {
+            this.cameraRig.triggerImpulse(0.14, 0.18);
+          }
         }
       }
     }
@@ -463,7 +497,7 @@ export class Renderer3D {
     }
   }
 
-  _syncMatchPlayers(players, dt) {
+  _syncMatchPlayers(players, dt, matchElapsedSec = 0) {
     const activeSlotIds = new Set();
 
     for (let i = 0; i < players.length; i += 1) {
@@ -494,7 +528,7 @@ export class Renderer3D {
         this.characterRigsById.set(p.id, entry);
       }
 
-      updateCharacterRig(entry.rig, p, this.elapsedSec, dt || 1 / 60);
+      updateCharacterRig(entry.rig, p, this.elapsedSec, dt || 1 / 60, null, matchElapsedSec);
     }
 
     for (const [slotId, entry] of this.characterRigsById.entries()) {
@@ -503,6 +537,34 @@ export class Renderer3D {
         disposeRigNodeWithoutTextures(entry.rig.root);
         this.characterRigsById.delete(slotId);
       }
+    }
+  }
+
+  /**
+   * Projects a 3D world coordinate `(wx, wy, wz)` into viewport pixel coordinates `{ x, y }`.
+   */
+  projectWorldToScreen(wx, wy, wz) {
+    const vec = this.cameraRig._tmpVec.set(wx, wy, wz).project(this.cameraRig.camera);
+    const w = this.cameraRig.viewportWidth || 1280;
+    const h = this.cameraRig.viewportHeight || 800;
+    return {
+      x: Math.round(((vec.x + 1) * 0.5) * w),
+      y: Math.round(((1 - vec.y) * 0.5) * h),
+    };
+  }
+
+  syncCameraFollow(snap, dt = 1 / 60) {
+    if (!snap || !this.cameraRig.followCameraActive) return;
+    const tick = typeof snap.tick === 'number' ? snap.tick : 0;
+    const p1 = (snap.players || []).find((p) => p.id === 'p1') || snap.players?.[0] || null;
+    if (p1) {
+      this._lastFollowSyncTick = tick;
+      this.cameraRig.updateFollowTarget(
+        tileToWorldX(p1.x),
+        tileToWorldZ(p1.z),
+        dt,
+        tick <= 1
+      );
     }
   }
 
@@ -529,6 +591,14 @@ export class Renderer3D {
       viewportWidth: this.cameraRig.viewportWidth,
       viewportHeight: this.cameraRig.viewportHeight,
       screenMode: this.screenMode,
+      followCameraActive: Boolean(this.cameraRig.followCameraActive),
+      followTargetX: +this.cameraRig.followTargetX.toFixed(3),
+      followTargetZ: +this.cameraRig.followTargetZ.toFixed(3),
+      visibleTileWidth: Number(this.cameraRig.visibleTileWidth || 0),
+      visibleTileWidthFull: Number(this.cameraRig.visibleTileWidthFull || 0),
+      visibleTileHeight: Number(this.cameraRig.visibleTileHeight || 0),
+      arenaFillRatioW: this.cameraRig.arenaFillRatioW,
+      lastShakeAmp: +this.cameraRig.lastShakeAmp.toFixed(3),
       arenaScreenBounds: { ...this.cameraRig.arenaScreenBounds },
     };
   }

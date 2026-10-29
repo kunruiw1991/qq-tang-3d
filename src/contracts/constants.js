@@ -99,17 +99,24 @@ export const EVENT_TYPES = Object.freeze({
   BOSS_ATTACK: 'boss_attack',
   BOSS_HIT: 'boss_hit',
   BOSS_DEFEAT: 'boss_defeat',
+  CANDY_RAIN_WARNING: 'candy_rain_warning',
+  CANDY_RAIN_DROP: 'candy_rain_drop',
   MATCH_END: 'match_end',
 });
 
 // Core combat & lifecycle timings
-export const BUBBLE_FUSE_SEC = 3.0;
-export const BLAST_LINGER_SEC = 0.40;
+export const BUBBLE_FUSE_SEC = 2.6;
+export const BLAST_LINGER_SEC = 0.45;
 export const TRAP_DURATION_SEC = 5.5;
 export const DISMOUNT_INVULN_SEC = 1.1; // Strictly > BLAST_LINGER_SEC so mount/shield sacrifice never traps rider on next tick!
 export const RESCUE_INVULN_SEC = 1.5;
 export const RESPAWN_INVULN_SEC = 2.0;
 export const PICKUP_SPAWN_GRACE_SEC = 0.55; // Strictly > BLAST_LINGER_SEC so revealing blast never vaporizes its own drop!
+export const HIT_STOP_TRAP_SEC = 0.07;
+export const HIT_STOP_KO_SEC = 0.11;
+export const COUNTDOWN_TOTAL_SEC = 1.5;
+export const P1_MARKER_DURATION_SEC = 5.0;
+export const CANDY_RAIN_WARNING_LEAD_SEC = 1.0;
 
 // Movement & item parameters
 export const SPEED_STEP_PER_PICKUP = 0.45;
@@ -124,18 +131,25 @@ export const UFO_HOVER_SPEED = 6.6;
 export const SOFT_BLOCK_DROP_RATE = 0.52;
 
 // Mode & Boss parameters
-export const MATCH_DURATION_SEC = 150;
+export const MATCH_DURATION_SEC = 120;
 export const OVERTIME_DURATION_SEC = 20;
+export const CLASSIC_TEAM_LIVES = 3;
+export const CLASSIC_RESPAWN_SEC = 2.5;
+export const SUDDEN_DEATH_START_SEC = 30;
+export const CANDY_RAIN_INTERVAL_SEC = 0.5;
 export const BUN_WIN_SCORE = 5;
 export const ACTIVE_BUN_TARGET = 1;
 export const BUN_DROP_LOCK_SEC = 0.60;
 export const BUN_RESPAWN_DELAY_SEC = 2.6;
 export const PLAYER_RESPAWN_SEC = 3.5;
 export const BOSS_PLAYER_RESPAWN_SEC = 4.0;
-export const BOSS_MAX_HP = 12;
+export const BOSS_MAX_HP = 24;
+export const BOSS_PHASE2_HP = 12;
+export const BOSS_HUMAN_HIT_DAMAGE = 2;
+export const BOSS_BOT_HIT_DAMAGE = 1;
 export const BOSS_HIT_INVULN_SEC = 0.45;
-export const BOSS_TELEGRAPH_SEC = 1.2;
-export const BOSS_SHARED_LIVES = 3;
+export const BOSS_TELEGRAPH_SEC = 1.0;
+export const BOSS_SHARED_LIVES = 4;
 
 export const CARDINAL_DIRS = Object.freeze([
   Object.freeze({ name: 'north', dc: 0, dr: -1 }),
@@ -347,6 +361,7 @@ export const MODE_METADATA = Object.freeze({
 export const TEST_IDS = Object.freeze({
   ARENA_CANVAS: 'arena-canvas',
   BTN_PLAY: 'btn-play',
+  BTN_QUICK_START: 'btn-quick-start',
   CHAR_CARDS: Object.freeze({
     miduo: 'char-card-miduo',
     xiaoqiang: 'char-card-xiaoqiang',
@@ -365,12 +380,17 @@ export const TEST_IDS = Object.freeze({
     boss_golem: 'mode-card-boss_golem',
   }),
   BTN_TOGGLE_2P: 'btn-toggle-2p',
+  BTN_TOGGLE_DIFFICULTY: 'btn-toggle-difficulty',
   BTN_START_MATCH: 'btn-start-match',
   HUD_BTN_HOME: 'hud-btn-home',
   HUD_BTN_AUDIO: 'hud-btn-audio',
   HUD_JOYSTICK: 'hud-joystick',
   HUD_BTN_ITEM: 'hud-btn-item',
   HUD_BTN_BUBBLE: 'hud-btn-bubble',
+  HUD_P1_MARKER: 'hud-p1-marker',
+  HUD_TRAPPED_HINT: 'hud-trapped-hint',
+  HUD_TRAPPED_RING: 'hud-trapped-ring',
+  HUD_CANDY_RAIN_STAMP: 'hud-candy-rain-stamp',
   BTN_RESUME: 'btn-resume',
   BTN_RESTART: 'btn-restart',
   BTN_QUIT_SELECT: 'btn-quit-select',

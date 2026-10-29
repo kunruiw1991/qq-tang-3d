@@ -92,9 +92,14 @@ export class SimEngine {
     this.rng = createPRNG(this.seed);
 
     this.botBehavior = config.botBehavior === 'idle' ? 'idle' : 'active';
+    this.difficulty = config.difficulty === 'easy' ? 'easy' : 'normal';
     this.autoPlayP1 = Boolean(config.autoPlayP1);
     this.p2Enabled = Boolean(config.p2Enabled);
     this.disableRandomDrops = Boolean(config.disableRandomDrops);
+    this.classicTeamLives =
+      Number.isInteger(config.classicTeamLives) && config.classicTeamLives >= 1
+        ? config.classicTeamLives
+        : null;
 
     this.constants = {
       BUBBLE_FUSE_SEC,
@@ -310,6 +315,14 @@ export class SimEngine {
   }
 
   /**
+   * Updates AI difficulty ('easy' | 'normal') dynamically if needed.
+   * @param {'easy'|'normal'} difficulty
+   */
+  setDifficulty(difficulty) {
+    this.difficulty = difficulty === 'easy' ? 'easy' : 'normal';
+  }
+
+  /**
    * Sets directional movement and action triggers for a player slot ('p1', 'p2', etc.).
    * Movement axes persist across steps until changed; dropBubble & useItem fire as crisp pulses.
    *
@@ -429,7 +442,11 @@ export class SimEngine {
       winningTeam: this.winningTeam,
       modeId: this.modeId,
       arenaId: this.arenaId,
+      difficulty: this.difficulty,
       seed: this.seed,
+      suddenDeathActive: Boolean(this.suddenDeathActive),
+      candyRainWarningActive: Boolean(this.candyRainWarningActive),
+      candyRainIndex: this.candyRainIndex || 0,
       grid: cloneGrid(this.grid),
       players: this.players.map((p) => ({
         id: p.id,
@@ -535,6 +552,10 @@ export class SimEngine {
         red: this.teamScores.red,
       },
       teamLives: this.teamLives,
+      teamStockLives: {
+        blue: this.teamStockLives ? this.teamStockLives.blue : this.teamLives,
+        red: this.teamStockLives ? this.teamStockLives.red : 0,
+      },
       rankings: computeRankings(this),
       events: this.events.map((ev) => ({ ...ev })),
     };

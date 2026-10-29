@@ -173,21 +173,41 @@ body {
   color: #0284c7;
 }
 
+.title-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  pointer-events: none;
+}
+
 .btn-giant-play {
-  min-width: 244px;
-  min-height: 84px;
-  padding: 12px 34px;
+  min-width: 224px;
+  min-height: 80px;
+  padding: 12px 30px;
   background: linear-gradient(180deg, #4ade80 0%, #22c55e 52%, #16a34a 100%);
   animation: playPulse 1.9s ease-in-out infinite;
 }
 
 .btn-giant-play .btn-svg {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
 }
 
 .btn-giant-play .btn-label {
-  font-size: 27px;
+  font-size: 26px;
+}
+
+.btn-quick-start {
+  min-width: 196px;
+  min-height: 80px;
+  padding: 12px 26px;
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 52%, #0369a1 100%);
+}
+
+.btn-quick-start .btn-label {
+  font-size: 24px;
 }
 
 @keyframes candyFloat {
@@ -340,6 +360,17 @@ body {
   gap: 14px;
 }
 
+.btn-difficulty-toggle {
+  min-width: 176px;
+  min-height: 68px;
+  padding: 8px 18px;
+  background: linear-gradient(180deg, #34d399 0%, #059669 100%);
+}
+
+.btn-difficulty-toggle.is-normal-diff {
+  background: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
+}
+
 .btn-2p-toggle {
   min-width: 140px;
   min-height: 68px;
@@ -436,6 +467,240 @@ body {
 .score-chip {
   font-size: 14px;
   padding: 0 4px;
+}
+
+.hud-hearts-big {
+  font-size: 18px;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+
+.sudden-death-pill {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+  color: #fef08a;
+  font-size: 13px;
+  font-weight: 900;
+  animation: needleUrgent 0.45s ease-in-out infinite alternate;
+}
+
+/* 3-2-1-GO Countdown Banner & Control Hint (strictly non-clickable) */
+.hud-countdown-banner {
+  pointer-events: none !important;
+  position: fixed;
+  left: 50%;
+  top: 28%;
+  transform: translate(-50%, -50%);
+  z-index: 24;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 26px;
+  border-radius: 28px;
+  background: rgba(15, 23, 42, 0.78);
+  border: 3.5px solid #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.35);
+}
+
+.countdown-number {
+  pointer-events: none !important;
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 900;
+  color: #fde047;
+  text-shadow:
+    0 3px 0 #b45309,
+    0 6px 16px rgba(250, 204, 21, 0.55);
+}
+
+.countdown-hint {
+  pointer-events: none !important;
+  font-size: 16px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+}
+
+/* >=48px Bouncing "你 · 角色名 ▼" P1 Marker (5s, strictly non-clickable) */
+.hud-p1-you-marker {
+  pointer-events: none !important;
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -100%);
+  z-index: 23;
+  min-width: 138px;
+  min-height: 54px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  border: 3.5px solid #facc15;
+  box-shadow:
+    0 6px 18px rgba(15, 23, 42, 0.55),
+    0 0 0 3px rgba(250, 204, 21, 0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.hud-p1-you-marker[hidden] {
+  display: none !important;
+}
+
+.p1-marker-name {
+  pointer-events: none !important;
+  font-size: 20px;
+  font-weight: 900;
+  color: #fef08a;
+  line-height: 1.1;
+}
+
+.p1-marker-arrow {
+  pointer-events: none !important;
+  font-size: 20px;
+  font-weight: 900;
+  color: #facc15;
+  line-height: 1;
+}
+
+/* Trapped Onboarding Hint & Shrinking Ring Timer (strictly non-clickable) */
+.hud-trapped-onboarding {
+  pointer-events: none !important;
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+}
+
+.hud-trapped-onboarding[hidden] {
+  display: none !important;
+}
+
+.trapped-bubble-ring {
+  pointer-events: none !important;
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  border: 5px dashed #fde047;
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.85),
+    inset 0 0 16px rgba(250, 204, 21, 0.65);
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.trapped-hint-banner {
+  pointer-events: none !important;
+  position: fixed;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -100%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
+  border: 3px solid #fde047;
+  color: #fef08a;
+  font-size: 20px;
+  font-weight: 900;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.55);
+}
+
+/* Candy Rain 1s Pre-Warning Stamp (strictly non-clickable) */
+.hud-candy-rain-stamp {
+  pointer-events: none !important;
+  position: fixed;
+  left: 50%;
+  top: 19%;
+  transform: translate(-50%, -50%) rotate(-3deg);
+  z-index: 26;
+  padding: 10px 26px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+  border: 4px solid #fde047;
+  color: #fef08a;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  box-shadow:
+    0 10px 28px rgba(185, 28, 28, 0.55),
+    0 0 0 4px rgba(255, 255, 255, 0.85);
+}
+
+.hud-candy-rain-stamp[hidden] {
+  display: none !important;
+}
+
+/* Floating 3D-Projected Combat Text Popups (KO!, 救援!, +1, 连爆×N!, 2×!) */
+.hud-floating-popups {
+  pointer-events: none !important;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 25;
+}
+
+.floating-combat-popup {
+  pointer-events: none !important;
+  position: fixed;
+  left: 0;
+  top: 0;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.05;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  text-shadow:
+    0 2px 0 #0f172a,
+    0 4px 10px rgba(15, 23, 42, 0.65);
+  will-change: transform, opacity;
+}
+
+.floating-combat-popup.popup-ko {
+  font-size: 34px;
+  color: #fef08a;
+  background: rgba(220, 38, 38, 0.88);
+  border: 2.5px solid #ffffff;
+}
+
+.floating-combat-popup.popup-rescue {
+  font-size: 30px;
+  color: #ffffff;
+  background: rgba(22, 163, 74, 0.88);
+  border: 2.5px solid #ffffff;
+}
+
+.floating-combat-popup.popup-chain {
+  font-size: 32px;
+  color: #fffbeb;
+  background: rgba(234, 88, 12, 0.90);
+  border: 2.5px solid #fde047;
+}
+
+.floating-combat-popup.popup-boss2x {
+  font-size: 34px;
+  color: #fef08a;
+  background: rgba(147, 51, 234, 0.90);
+  border: 2.5px solid #fde047;
+}
+
+.floating-combat-popup.popup-plus {
+  font-size: 24px;
+  color: #fde047;
+  background: rgba(2, 132, 199, 0.82);
+  border: 2px solid #ffffff;
 }
 
 /* The 5 interactive HUD controls */
@@ -730,6 +995,13 @@ body {
 }
 
 .btn-again-green { background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%); }
+.btn-primary-hero {
+  min-width: 196px;
+  min-height: 74px;
+  box-shadow:
+    0 0 0 4px rgba(250, 204, 21, 0.85),
+    0 10px 24px rgba(22, 163, 74, 0.45);
+}
 .btn-select-blue { background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%); }
 
 /* ==========================================================================
@@ -754,10 +1026,16 @@ body {
     font-size: 32px;
   }
 
-  .btn-giant-play {
-    min-width: 210px;
+  .btn-giant-play,
+  .btn-quick-start {
+    min-width: 190px;
     min-height: 70px;
-    padding: 8px 26px;
+    padding: 8px 22px;
+  }
+
+  .btn-giant-play .btn-label,
+  .btn-quick-start .btn-label {
+    font-size: 21px;
   }
 
   .screen-select {
@@ -805,22 +1083,27 @@ body {
   }
 
   .select-action-bar {
-    width: 168px;
+    width: 174px;
     flex-direction: column;
     justify-content: flex-end;
-    gap: 10px;
+    gap: 8px;
   }
 
+  .btn-difficulty-toggle,
   .btn-2p-toggle {
     width: 100%;
     min-width: 0;
     min-height: 68px;
-    padding: 6px 12px;
+    padding: 6px 10px;
+  }
+
+  .btn-difficulty-toggle .btn-label {
+    font-size: 15px;
   }
 
   .btn-start-go {
     width: 100%;
-    min-height: 92px;
+    min-height: 76px;
     padding: 8px 12px;
   }
 
@@ -862,7 +1145,7 @@ body {
   }
 
   .pause-btn {
-    min-height: 66px;
+    min-height: 68px;
     padding: 8px 12px;
   }
 
@@ -879,7 +1162,7 @@ body {
   }
 
   .podium-btn {
-    min-height: 66px;
+    min-height: 68px;
     padding: 8px 18px;
   }
 }
@@ -909,6 +1192,18 @@ body {
   .title-sub {
     font-size: 11px;
     letter-spacing: 1.2px;
+  }
+
+  .title-actions-row {
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .btn-giant-play,
+  .btn-quick-start {
+    width: min(280px, 100%);
+    min-height: 72px;
   }
 
   .screen-select {
@@ -954,18 +1249,28 @@ body {
   }
 
   .select-action-bar {
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .btn-difficulty-toggle {
+    min-width: 112px;
+    min-height: 68px;
+    padding: 6px 8px;
+  }
+
+  .btn-difficulty-toggle .btn-label {
+    font-size: 13px;
   }
 
   .btn-2p-toggle {
-    min-width: 106px;
+    min-width: 82px;
     min-height: 68px;
-    padding: 6px 12px;
+    padding: 6px 8px;
   }
 
   .btn-start-go {
     min-height: 68px;
-    padding: 8px 16px;
+    padding: 8px 12px;
   }
 
   .btn-start-go .btn-label {

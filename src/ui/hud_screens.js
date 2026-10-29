@@ -3,11 +3,12 @@
  * for QQ Tang: Candy Bubble Arena 3D (QQ堂 3D).
  *
  * Screens:
- *  - 'title'   : Candy-glossy Title badge + giant Play button ([data-testid="btn-play"])
+ *  - 'title'   : Candy-glossy Title badge + Play button ([data-testid="btn-play"]) + Quick Start ([data-testid="btn-quick-start"])
  *  - 'select'  : Visual Character (4), Arena (4), Mode (3), 1P/2P toggle & GO button
- *  - 'playing' : Strictly <= 5 clickable controls (>=64x64px, 0 overlap) + non-interactive status strip
+ *  - 'playing' : Strictly <= 5 clickable controls (>=68x68px, 0 overlap) + non-interactive status strip,
+ *                big team stock hearts, 3-2-1-GO countdown banner, and floating combat text popups
  *  - 'paused'  : Resume / Restart / Quit-to-Select modal
- *  - 'podium'  : Top/bottom framed Victory Podium overlay keeping center 3D characters unobstructed
+ *  - 'podium'  : Top/bottom framed Victory Podium overlay showing hearts/KOs/rescues as big icons & primary "再来一局" CTA
  */
 
 import {
@@ -16,11 +17,16 @@ import {
   BUN_WIN_SCORE,
   CHARACTER_IDS,
   CHARACTER_METADATA,
+  EVENT_TYPES,
   MODE_IDS,
   MODE_METADATA,
+  P1_MARKER_DURATION_SEC,
   PLAYER_STATES,
   SCREEN_IDS,
   TEST_IDS,
+  TRAP_DURATION_SEC,
+  tileToWorldX,
+  tileToWorldZ,
 } from '../contracts/constants.js';
 import {
   ARENA_ILLUSTRATIONS,
@@ -45,6 +51,12 @@ function buildStatDots(count, maxShown, dotClass) {
   return html;
 }
 
+function renderHeartIcons(lives, maxLives = 3) {
+  const aliveCount = Math.max(0, Math.min(maxLives, Math.round(Number(lives) || 0)));
+  const lostCount = Math.max(0, maxLives - aliveCount);
+  return '❤️'.repeat(aliveCount) + '🖤'.repeat(lostCount);
+}
+
 export class HudScreens {
   /**
    * @param {HTMLElement} rootEl
@@ -55,6 +67,8 @@ export class HudScreens {
     this._cb = callbacks;
     this._currentScreen = SCREEN_IDS.TITLE;
     this._els = {};
+    this._activePopups = [];
+    this._nextPopupId = 1;
 
     this._renderStaticDom();
     this._bindEvents();
@@ -129,15 +143,27 @@ export class HudScreens {
           </div>
         </div>
 
-        <button
-          type="button"
-          class="candy-btn btn-giant-play"
-          data-testid="${TEST_IDS.BTN_PLAY}"
-          aria-label="Play QQ Tang 3D"
-        >
-          <span class="btn-svg">${UI_ICONS.playBig}</span>
-          <span class="btn-label">PLAY · 开始</span>
-        </button>
+        <div class="title-actions-row">
+          <button
+            type="button"
+            class="candy-btn btn-giant-play"
+            data-testid="${TEST_IDS.BTN_PLAY}"
+            aria-label="Play QQ Tang 3D"
+          >
+            <span class="btn-svg">${UI_ICONS.playBig}</span>
+            <span class="btn-label">PLAY · 开始</span>
+          </button>
+
+          <button
+            type="button"
+            class="candy-btn btn-quick-start"
+            data-testid="${TEST_IDS.BTN_QUICK_START}"
+            aria-label="Quick Start Classic Candy Town MiDuo"
+          >
+            <span class="btn-svg">${UI_ICONS.playBig}</span>
+            <span class="btn-label">⚡ 快速开始</span>
+          </button>
+        </div>
       </section>
 
       <!-- 2. SELECT SCREEN -->
@@ -156,6 +182,16 @@ export class HudScreens {
           </div>
 
           <div class="select-action-bar">
+            <button
+              type="button"
+              class="candy-btn btn-difficulty-toggle"
+              data-testid="${TEST_IDS.BTN_TOGGLE_DIFFICULTY}"
+              aria-pressed="false"
+              aria-label="Toggle Bot Difficulty Easy or Normal"
+            >
+              <span class="btn-label" data-role="difficulty-label">🤖 电脑: 简单</span>
+            </button>
+
             <button
               type="button"
               class="candy-btn btn-2p-toggle"
@@ -180,12 +216,12 @@ export class HudScreens {
         </div>
       </section>
 
-      <!-- 3. ACTIVE GAMEPLAY HUD (STRICTLY <= 5 CLICKABLE CONTROLS, ALL >= 64x64px) -->
+      <!-- 3. ACTIVE GAMEPLAY HUD (STRICTLY <= 5 CLICKABLE CONTROLS, ALL >= 68x68px) -->
       <section class="ui-screen screen-playing" data-screen="playing" hidden>
         <!-- Non-interactive status strip (pointer-events: none, zero interactive elements) -->
         <div class="hud-status-strip">
           <div class="hud-pill hud-clock-pill">
-            <span class="hud-clock-text" data-role="clock-text">2:30</span>
+            <span class="hud-clock-text" data-role="clock-text">2:00</span>
           </div>
 
           <div class="hud-pill hud-p1-pill">
@@ -195,6 +231,32 @@ export class HudScreens {
 
           <div class="hud-pill hud-mode-pill" data-role="mode-status"></div>
         </div>
+
+        <!-- Non-interactive 3-2-1-GO Countdown & 1-line Control Hint Banner -->
+        <div class="hud-countdown-banner" data-testid="hud-countdown" data-role="countdown-overlay" hidden aria-hidden="true">
+          <div class="countdown-number" data-role="countdown-number">3</div>
+          <div class="countdown-hint" data-role="countdown-hint">WASD/摇杆 · 空格/🫧</div>
+        </div>
+
+        <!-- Non-interactive >=48px Bouncing "你 · 角色名 ▼" P1 Marker (5s) -->
+        <div class="hud-p1-you-marker" data-testid="${TEST_IDS.HUD_P1_MARKER}" data-role="p1-you-marker" hidden aria-hidden="true">
+          <span class="p1-marker-name" data-role="p1-marker-name">你 · 米多</span>
+          <span class="p1-marker-arrow">▼</span>
+        </div>
+
+        <!-- Non-interactive Trapped Onboarding Hint & Shrinking Ring Timer -->
+        <div class="hud-trapped-onboarding" data-testid="${TEST_IDS.HUD_TRAPPED_HINT}" data-role="trapped-onboarding" hidden aria-hidden="true">
+          <div class="trapped-bubble-ring" data-testid="${TEST_IDS.HUD_TRAPPED_RING}" data-role="trapped-ring"></div>
+          <div class="trapped-hint-banner" data-role="trapped-banner">被困住了! 队友来救 / 🪡 用针</div>
+        </div>
+
+        <!-- Non-interactive Candy Rain Sudden Death Warning Stamp (1s before start) -->
+        <div class="hud-candy-rain-stamp" data-testid="${TEST_IDS.HUD_CANDY_RAIN_STAMP}" data-role="candy-rain-stamp" hidden aria-hidden="true">
+          ⚠️ 糖果雨来了!
+        </div>
+
+        <!-- Non-interactive Floating Combat Text Popups ("KO!", "救援!", "+1", "连爆×N!", "2×!") -->
+        <div class="hud-floating-popups" data-testid="hud-popups" data-role="floating-popups" aria-hidden="true"></div>
 
         <!-- Control 1/5: Top-Left Pause / Home (>= 68x68px) -->
         <button
@@ -304,7 +366,7 @@ export class HudScreens {
           <div class="podium-bottom-bar">
             <button
               type="button"
-              class="candy-btn podium-btn btn-again-green"
+              class="candy-btn podium-btn btn-again-green btn-primary-hero"
               data-testid="${TEST_IDS.BTN_PLAY_AGAIN}"
               aria-label="Play Again"
             >
@@ -335,6 +397,9 @@ export class HudScreens {
         podium: this._root.querySelector('[data-screen="podium"]'),
       },
       btnPlay: this._root.querySelector(`[data-testid="${TEST_IDS.BTN_PLAY}"]`),
+      btnQuickStart: this._root.querySelector(`[data-testid="${TEST_IDS.BTN_QUICK_START}"]`),
+      btnToggleDifficulty: this._root.querySelector(`[data-testid="${TEST_IDS.BTN_TOGGLE_DIFFICULTY}"]`),
+      difficultyLabel: this._root.querySelector('[data-role="difficulty-label"]'),
       btnToggle2P: this._root.querySelector(`[data-testid="${TEST_IDS.BTN_TOGGLE_2P}"]`),
       toggle2PIcon: this._root.querySelector('[data-role="2p-icon"]'),
       toggle2PLabel: this._root.querySelector('[data-role="2p-label"]'),
@@ -357,6 +422,16 @@ export class HudScreens {
       p1Avatar: this._root.querySelector('[data-role="p1-avatar"]'),
       p1Stats: this._root.querySelector('[data-role="p1-stats"]'),
       modeStatus: this._root.querySelector('[data-role="mode-status"]'),
+      countdownOverlay: this._root.querySelector('[data-role="countdown-overlay"]'),
+      countdownNumber: this._root.querySelector('[data-role="countdown-number"]'),
+      countdownHint: this._root.querySelector('[data-role="countdown-hint"]'),
+      p1YouMarker: this._root.querySelector('[data-role="p1-you-marker"]'),
+      p1MarkerName: this._root.querySelector('[data-role="p1-marker-name"]'),
+      trappedOnboarding: this._root.querySelector('[data-role="trapped-onboarding"]'),
+      trappedRing: this._root.querySelector('[data-role="trapped-ring"]'),
+      trappedBanner: this._root.querySelector('[data-role="trapped-banner"]'),
+      candyRainStamp: this._root.querySelector('[data-role="candy-rain-stamp"]'),
+      floatingPopups: this._root.querySelector('[data-role="floating-popups"]'),
 
       btnResume: this._root.querySelector(`[data-testid="${TEST_IDS.BTN_RESUME}"]`),
       btnRestart: this._root.querySelector(`[data-testid="${TEST_IDS.BTN_RESTART}"]`),
@@ -379,6 +454,13 @@ export class HudScreens {
       this._cb.onOpenSelect?.();
     });
 
+    if (this._els.btnQuickStart) {
+      this._els.btnQuickStart.addEventListener('click', () => {
+        safeBlur(this._els.btnQuickStart);
+        this._cb.onQuickStartClick?.();
+      });
+    }
+
     for (const card of this._els.charCards) {
       card.addEventListener('click', () => {
         safeBlur(card);
@@ -397,6 +479,13 @@ export class HudScreens {
       card.addEventListener('click', () => {
         safeBlur(card);
         this._cb.onSelectMode?.(card.getAttribute('data-mode-id'));
+      });
+    }
+
+    if (this._els.btnToggleDifficulty) {
+      this._els.btnToggleDifficulty.addEventListener('click', () => {
+        safeBlur(this._els.btnToggleDifficulty);
+        this._cb.onToggleDifficulty?.();
       });
     }
 
@@ -487,6 +576,13 @@ export class HudScreens {
     this._els.btnToggle2P.setAttribute('aria-pressed', p2 ? 'true' : 'false');
     this._els.toggle2PIcon.innerHTML = p2 ? UI_ICONS.players2P : UI_ICONS.players1P;
     this._els.toggle2PLabel.textContent = p2 ? '2P' : '1P';
+
+    if (this._els.btnToggleDifficulty && this._els.difficultyLabel) {
+      const isNormal = config.difficulty === 'normal';
+      this._els.btnToggleDifficulty.classList.toggle('is-normal-diff', isNormal);
+      this._els.btnToggleDifficulty.setAttribute('aria-pressed', isNormal ? 'true' : 'false');
+      this._els.difficultyLabel.textContent = isNormal ? '🤖 电脑: 普通' : '🤖 电脑: 简单';
+    }
   }
 
   syncAudioMuted(muted) {
@@ -497,7 +593,203 @@ export class HudScreens {
     this._els.hudAudio.classList.toggle('is-muted', isMuted);
   }
 
-  updateHud(simSnapshot, muted = false) {
+  /**
+   * Updates the 3-2-1-GO (1.5s total) countdown banner and control hint.
+   * @param {number} remainingSec
+   */
+  updateCountdown(remainingSec = 0) {
+    const overlay = this._els.countdownOverlay;
+    if (!overlay) return;
+    const rem = Number(remainingSec) || 0;
+    if (rem <= 0) {
+      if (!overlay.hidden) {
+        overlay.hidden = true;
+        overlay.setAttribute('aria-hidden', 'true');
+      }
+      return;
+    }
+
+    if (overlay.hidden) {
+      overlay.hidden = false;
+      overlay.setAttribute('aria-hidden', 'false');
+    }
+
+    let label = 'GO!';
+    if (rem > 1.05) label = '3';
+    else if (rem > 0.60) label = '2';
+    else if (rem > 0.18) label = '1';
+
+    if (this._els.countdownNumber && this._els.countdownNumber.textContent !== label) {
+      this._els.countdownNumber.textContent = label;
+    }
+  }
+
+  /**
+   * Clears all floating combat text popups (e.g. on match reset).
+   */
+  clearFloatingPopups() {
+    this._activePopups = [];
+    if (this._els.floatingPopups) {
+      this._els.floatingPopups.innerHTML = '';
+    }
+  }
+
+  /**
+   * Spawns a floating 3D/DOM text popup ("KO!", "救援!", "+1", "连爆×N!", "2×!") that scales up & fades over 0.9s.
+   */
+  spawnFloatingPopup({ text, worldX = 0, worldZ = 0, variant = 'ko', projectFn = null }) {
+    if (!this._els.floatingPopups || !text) return null;
+    const el = document.createElement('div');
+    el.className = `floating-combat-popup popup-${variant}`;
+    el.textContent = text;
+    this._els.floatingPopups.appendChild(el);
+
+    const pt =
+      typeof projectFn === 'function'
+        ? projectFn(worldX, 1.35, worldZ)
+        : { x: 640, y: 360 };
+
+    const entry = {
+      id: this._nextPopupId++,
+      text,
+      variant,
+      worldX,
+      worldZ,
+      screenX: pt.x,
+      screenY: pt.y,
+      ageSec: 0,
+      durationSec: 0.9,
+      el,
+    };
+    this._activePopups.push(entry);
+    this._applyPopupStyle(entry);
+    return entry;
+  }
+
+  _applyPopupStyle(p) {
+    const progress = Math.max(0, Math.min(1, p.ageSec / p.durationSec));
+    const liftY = progress * 48;
+    const scale =
+      progress < 0.22
+        ? 0.68 + (progress / 0.22) * 0.62
+        : 1.30 - ((progress - 0.22) / 0.78) * 0.22;
+    const opacity = progress < 0.68 ? 1.0 : Math.max(0, 1.0 - (progress - 0.68) / 0.32);
+
+    p.el.style.left = `${Math.round(p.screenX)}px`;
+    p.el.style.top = `${Math.round(p.screenY - liftY)}px`;
+    p.el.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+    p.el.style.opacity = opacity.toFixed(3);
+  }
+
+  /**
+   * Consumes simulation events to spawn floating "KO!", "救援!", "+1", "连爆×N!", and "2×!" popups.
+   */
+  consumeCombatEventsForPopups(events, players = [], projectFn = null) {
+    if (!Array.isArray(events) || events.length === 0) return;
+
+    const findPlayerWorld = (pid) => {
+      const p = players.find((pl) => pl.id === pid);
+      return p ? [tileToWorldX(p.x), tileToWorldZ(p.z)] : null;
+    };
+
+    for (let i = 0; i < events.length; i += 1) {
+      const ev = events[i];
+      if (!ev || !ev.type) continue;
+
+      if (ev.type === EVENT_TYPES.POP) {
+        const pos = findPlayerWorld(ev.victimId) || [
+          tileToWorldX((ev.col ?? 7) + 0.5),
+          tileToWorldZ((ev.row ?? 6) + 0.5),
+        ];
+        this.spawnFloatingPopup({
+          text: 'KO!',
+          worldX: pos[0],
+          worldZ: pos[1],
+          variant: 'ko',
+          projectFn,
+        });
+      } else if (ev.type === EVENT_TYPES.RESCUE || ev.type === EVENT_TYPES.NEEDLE_RESCUE) {
+        const pos = findPlayerWorld(ev.playerId || ev.victimId) || [0, 0];
+        this.spawnFloatingPopup({
+          text: '救援!',
+          worldX: pos[0],
+          worldZ: pos[1],
+          variant: 'rescue',
+          projectFn,
+        });
+      } else if (
+        ev.type === EVENT_TYPES.PICKUP ||
+        ev.type === EVENT_TYPES.BUN_PICKUP ||
+        ev.type === EVENT_TYPES.BUN_SCORE
+      ) {
+        const pos = findPlayerWorld(ev.playerId) || [
+          tileToWorldX((ev.col ?? 7) + 0.5),
+          tileToWorldZ((ev.row ?? 6) + 0.5),
+        ];
+        this.spawnFloatingPopup({
+          text: '+1',
+          worldX: pos[0],
+          worldZ: pos[1],
+          variant: 'plus',
+          projectFn,
+        });
+      } else if (ev.type === EVENT_TYPES.CHAIN_EXPLODE) {
+        const n = Math.max(2, Number(ev.chainCount) || 2);
+        this.spawnFloatingPopup({
+          text: `连爆×${n}!`,
+          worldX: tileToWorldX((ev.col ?? 7) + 0.5),
+          worldZ: tileToWorldZ((ev.row ?? 6) + 0.5),
+          variant: 'chain',
+          projectFn,
+        });
+      } else if (ev.type === EVENT_TYPES.BOSS_HIT && ev.isHumanHit) {
+        this.spawnFloatingPopup({
+          text: '2×!',
+          worldX: tileToWorldX((ev.col ?? 7) + 0.5),
+          worldZ: tileToWorldZ((ev.row ?? 6) + 0.5),
+          variant: 'boss2x',
+          projectFn,
+        });
+      }
+    }
+  }
+
+  /**
+   * Advances active floating popups by `dtSec` and removes expired ones after 0.9s.
+   */
+  stepFloatingPopups(dtSec = 1 / 60, projectFn = null) {
+    const dt = Math.max(0, Math.min(Number(dtSec) || 0, 0.25));
+    for (let i = this._activePopups.length - 1; i >= 0; i -= 1) {
+      const p = this._activePopups[i];
+      p.ageSec += dt;
+      if (p.ageSec >= p.durationSec) {
+        if (p.el && p.el.parentElement) {
+          p.el.parentElement.removeChild(p.el);
+        }
+        this._activePopups.splice(i, 1);
+        continue;
+      }
+      if (typeof projectFn === 'function') {
+        const pt = projectFn(p.worldX, 1.35, p.worldZ);
+        p.screenX = pt.x;
+        p.screenY = pt.y;
+      }
+      this._applyPopupStyle(p);
+    }
+  }
+
+  getActivePopups() {
+    return this._activePopups.map((p) => ({
+      id: p.id,
+      text: p.text,
+      variant: p.variant,
+      screenX: p.screenX,
+      screenY: p.screenY,
+      ageSec: +p.ageSec.toFixed(3),
+    }));
+  }
+
+  updateHud(simSnapshot, muted = false, projectFn = null) {
     this.syncAudioMuted(muted);
     if (!simSnapshot) return;
 
@@ -507,6 +799,7 @@ export class HudScreens {
       this._els.clockText.textContent = clockStr;
     }
 
+    const matchElapsedSec = Math.max(0, (Number(simSnapshot.tick) || 0) / 60);
     const p1 =
       simSnapshot.players.find((p) => p.id === 'p1') || simSnapshot.players[0] || null;
     if (p1) {
@@ -514,6 +807,69 @@ export class HudScreens {
         this._lastAvatarCharId = p1.characterId;
         this._els.p1Avatar.innerHTML =
           CHARACTER_PORTRAITS[p1.characterId] || CHARACTER_PORTRAITS.miduo;
+      }
+
+      // 1. >=48px Bouncing "你 · 角色名 ▼" P1 Marker for the first 5.0 seconds
+      if (this._els.p1YouMarker) {
+        const showMarker =
+          p1.state !== PLAYER_STATES.ELIMINATED && matchElapsedSec <= P1_MARKER_DURATION_SEC;
+        if (showMarker) {
+          if (this._els.p1YouMarker.hidden) {
+            this._els.p1YouMarker.hidden = false;
+            this._els.p1YouMarker.setAttribute('aria-hidden', 'false');
+          }
+          const charNameZh = CHARACTER_METADATA[p1.characterId]?.nameZh || '米多';
+          const markerText = `你 · ${charNameZh}`;
+          if (this._els.p1MarkerName && this._els.p1MarkerName.textContent !== markerText) {
+            this._els.p1MarkerName.textContent = markerText;
+          }
+          const pt =
+            typeof projectFn === 'function'
+              ? projectFn(tileToWorldX(p1.x), 1.95, tileToWorldZ(p1.z))
+              : { x: 640, y: 320 };
+          const bouncePx = Math.round(Math.abs(Math.sin(matchElapsedSec * 8.5)) * 12);
+          const clampedX = Math.max(80, Math.min((window.innerWidth || 1280) - 80, pt.x));
+          const clampedY = Math.max(96, Math.min((window.innerHeight || 800) - 60, pt.y));
+          this._els.p1YouMarker.style.left = `${clampedX}px`;
+          this._els.p1YouMarker.style.top = `${clampedY - bouncePx}px`;
+        } else if (!this._els.p1YouMarker.hidden) {
+          this._els.p1YouMarker.hidden = true;
+          this._els.p1YouMarker.setAttribute('aria-hidden', 'true');
+        }
+      }
+
+      // 2. Trapped Onboarding ("被困住了! 队友来救 / 🪡 用针" + shrinking ring timer around P1's bubble)
+      if (this._els.trappedOnboarding) {
+        const isTrapped = p1.state === PLAYER_STATES.TRAPPED;
+        if (isTrapped) {
+          if (this._els.trappedOnboarding.hidden) {
+            this._els.trappedOnboarding.hidden = false;
+            this._els.trappedOnboarding.setAttribute('aria-hidden', 'false');
+          }
+          const pt =
+            typeof projectFn === 'function'
+              ? projectFn(tileToWorldX(p1.x), 0.72, tileToWorldZ(p1.z))
+              : { x: 640, y: 400 };
+          const ringScale = Math.max(
+            0.20,
+            Math.min(1.0, (Number(p1.trapTimer) || 0) / TRAP_DURATION_SEC)
+          );
+          if (this._els.trappedRing) {
+            this._els.trappedRing.style.left = `${pt.x}px`;
+            this._els.trappedRing.style.top = `${pt.y}px`;
+            this._els.trappedRing.style.transform = `translate(-50%, -50%) scale(${ringScale.toFixed(3)})`;
+            this._els.trappedRing.setAttribute('data-scale', ringScale.toFixed(3));
+          }
+          if (this._els.trappedBanner) {
+            const bx = Math.max(150, Math.min((window.innerWidth || 1280) - 150, pt.x));
+            const by = Math.max(86, Math.min((window.innerHeight || 800) - 110, pt.y - 72));
+            this._els.trappedBanner.style.left = `${bx}px`;
+            this._els.trappedBanner.style.top = `${by}px`;
+          }
+        } else if (!this._els.trappedOnboarding.hidden) {
+          this._els.trappedOnboarding.hidden = true;
+          this._els.trappedOnboarding.setAttribute('aria-hidden', 'true');
+        }
       }
 
       const freeBubbles = Math.max(0, p1.maxBubbles - p1.activeBubbles);
@@ -558,7 +914,7 @@ export class HudScreens {
       modeStatusHtml = `
         <span class="boss-label">🤖 ${b.hp}/${b.maxHp}</span>
         <span class="boss-hp-track"><span class="boss-hp-fill" style="width:${pct}%"></span></span>
-        <span class="coop-lives">❤️${simSnapshot.teamLives}</span>
+        <span class="coop-lives"><span class="hud-hearts-big">${renderHeartIcons(simSnapshot.teamLives, 4)}</span> ${simSnapshot.teamLives}</span>
       `;
     } else if (simSnapshot.modeId === 'bun_grab') {
       modeStatusHtml = `
@@ -566,16 +922,34 @@ export class HudScreens {
         <span class="score-chip team-red">🔴 🥟 ${simSnapshot.teamScores.red}/${BUN_WIN_SCORE}</span>
       `;
     } else {
-      const blueAlive = simSnapshot.players.filter(
-        (p) => p.team === 0 && p.state !== PLAYER_STATES.ELIMINATED
-      ).length;
-      const redAlive = simSnapshot.players.filter(
-        (p) => p.team === 1 && p.state !== PLAYER_STATES.ELIMINATED
-      ).length;
+      const blueHearts = Math.max(0, simSnapshot.teamStockLives?.blue ?? 3);
+      const redHearts = Math.max(0, simSnapshot.teamStockLives?.red ?? 3);
+      const warningOrActive = Boolean(
+        simSnapshot.candyRainWarningActive || simSnapshot.suddenDeathActive
+      );
+      const suddenTag = warningOrActive
+        ? '<span class="sudden-death-pill">⚠️ 糖果雨来了!</span>'
+        : '';
+      if (this._els.candyRainStamp) {
+        const showStamp =
+          warningOrActive && Number(simSnapshot.timeRemainingSec) >= 20.0;
+        if (showStamp && this._els.candyRainStamp.hidden) {
+          this._els.candyRainStamp.hidden = false;
+          this._els.candyRainStamp.setAttribute('aria-hidden', 'false');
+        } else if (!showStamp && !this._els.candyRainStamp.hidden) {
+          this._els.candyRainStamp.hidden = true;
+          this._els.candyRainStamp.setAttribute('aria-hidden', 'true');
+        }
+      }
       modeStatusHtml = `
-        <span class="score-chip team-blue">🔵 ${blueAlive}</span>
-        <span class="score-chip team-red">🔴 ${redAlive}</span>
+        <span class="score-chip team-blue" data-role="blue-hearts">🔵 <span class="hud-hearts-big">${renderHeartIcons(blueHearts, 3)}</span> <b>${blueHearts}</b></span>
+        <span class="score-chip team-red" data-role="red-hearts">🔴 <span class="hud-hearts-big">${renderHeartIcons(redHearts, 3)}</span> <b>${redHearts}</b></span>
+        ${suddenTag}
       `;
+    }
+    if (simSnapshot.modeId !== 'classic_2v2' && this._els.candyRainStamp && !this._els.candyRainStamp.hidden) {
+      this._els.candyRainStamp.hidden = true;
+      this._els.candyRainStamp.setAttribute('aria-hidden', 'true');
     }
     if (this._lastModeStatusHtml !== modeStatusHtml) {
       this._lastModeStatusHtml = modeStatusHtml;
@@ -599,11 +973,15 @@ export class HudScreens {
       .slice(0, 4)
       .map((entry, idx) => {
         const badge = medals[idx] || `#${entry.rank}`;
+        const teamHearts =
+          entry.team === 0
+            ? simSnapshot.teamStockLives?.blue ?? simSnapshot.teamLives ?? 0
+            : simSnapshot.teamStockLives?.red ?? 0;
         return `
           <div class="podium-rank-chip ${entry.isWinner ? 'is-winner' : ''}">
             <span class="rank-medal">${badge}</span>
             <span class="rank-name">${entry.nameZh}</span>
-            <span class="rank-stat">★${entry.kos + entry.rescues + entry.bunsBanked}</span>
+            <span class="rank-stat">❤️${teamHearts} · 💥${entry.kos} · 🛟${entry.rescues}</span>
           </div>
         `;
       })
