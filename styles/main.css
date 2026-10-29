@@ -1,0 +1,1034 @@
+/* ==========================================================================
+   QQ Tang: Candy Bubble Arena 3D (QQ堂 3D) — Multi-Viewport Kid-Friendly Styles
+   Verified across 1280x800, 1024x768, 844x390, and 390x844:
+   - Zero document scrollbars (100% fixed viewport lock)
+   - Strictly <= 5 clickable HUD controls in 'playing', every one >= 64x64px
+   - Zero pairwise bounding-box overlap
+   - Zero root-absolute stylesheet asset paths
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important;
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background: radial-gradient(circle at 50% 25%, #ffeef6 0%, #dbeafe 60%, #bfdbfe 100%);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Nunito", system-ui, -apple-system, sans-serif;
+  color: #1e293b;
+}
+
+#arena-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 1;
+  touch-action: none;
+}
+
+#ui-root {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ui-screen {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Shared Candy-Glossy Button Aesthetic
+   ========================================================================== */
+.candy-btn {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 3.5px solid #ffffff;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  color: #ffffff;
+  text-shadow: 0 2px 3px rgba(15, 23, 42, 0.35);
+  box-shadow:
+    0 7px 0 rgba(15, 23, 42, 0.22),
+    0 12px 24px rgba(15, 23, 42, 0.22),
+    inset 0 4px 6px rgba(255, 255, 255, 0.55);
+  transition: transform 0.12s ease, filter 0.12s ease;
+  touch-action: manipulation;
+}
+
+.candy-btn:hover {
+  filter: brightness(1.06);
+}
+
+.candy-btn:active {
+  transform: translateY(3px) scale(0.97);
+}
+
+.candy-btn .btn-svg {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.candy-btn .btn-svg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.candy-btn .btn-label {
+  font-size: 20px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   1. Title Screen
+   ========================================================================== */
+.screen-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 34px 20px 44px;
+}
+
+.title-hero-banner {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 28px;
+  border-radius: 36px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 236, 245, 0.88));
+  border: 4px solid #ffffff;
+  box-shadow:
+    0 12px 30px rgba(236, 72, 153, 0.28),
+    inset 0 3px 0 rgba(255, 255, 255, 0.9);
+  animation: candyFloat 2.8s ease-in-out infinite;
+}
+
+.title-emblem {
+  width: 74px;
+  height: 74px;
+  flex-shrink: 0;
+}
+
+.title-emblem svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.title-zh {
+  font-size: 46px;
+  line-height: 1.04;
+  font-weight: 900;
+  color: #ec4899;
+  text-shadow:
+    0 3px 0 #ffffff,
+    0 6px 14px rgba(236, 72, 153, 0.35);
+}
+
+.title-sub {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #0284c7;
+}
+
+.btn-giant-play {
+  min-width: 244px;
+  min-height: 84px;
+  padding: 12px 34px;
+  background: linear-gradient(180deg, #4ade80 0%, #22c55e 52%, #16a34a 100%);
+  animation: playPulse 1.9s ease-in-out infinite;
+}
+
+.btn-giant-play .btn-svg {
+  width: 44px;
+  height: 44px;
+}
+
+.btn-giant-play .btn-label {
+  font-size: 27px;
+}
+
+@keyframes candyFloat {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes playPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+/* ==========================================================================
+   2. Visual Hero / Arena / Mode Select Screen
+   ========================================================================== */
+.screen-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 18px;
+}
+
+.select-shell {
+  pointer-events: auto;
+  width: min(920px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 3.5px solid #ffffff;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.22);
+}
+
+.select-grid-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.picker-row {
+  display: grid;
+  gap: 10px;
+}
+
+.picker-row-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.picker-row-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.picker-card {
+  pointer-events: auto;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 98px;
+  padding: 8px 6px;
+  border-radius: 22px;
+  border: 3.5px solid rgba(255, 255, 255, 0.95);
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+  font: inherit;
+  color: #1e293b;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  touch-action: manipulation;
+}
+
+.char-card {
+  min-height: 118px;
+}
+
+.picker-card.is-selected {
+  border-color: var(--card-accent, #ec4899);
+  background: linear-gradient(180deg, #ffffff 0%, #fff1f6 100%);
+  box-shadow:
+    0 0 0 3px var(--card-accent, #ec4899),
+    0 8px 18px rgba(236, 72, 153, 0.25);
+  transform: translateY(-2px);
+}
+
+.card-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.char-art {
+  width: 60px;
+  height: 60px;
+}
+
+.arena-art {
+  width: 68px;
+  height: 48px;
+}
+
+.mode-art {
+  width: 66px;
+  height: 46px;
+}
+
+.card-art svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.card-title {
+  pointer-events: none;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: #0f172a;
+}
+
+.card-stat-row {
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.stat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-bubble { background: #38bdf8; }
+.dot-power  { background: #f97316; }
+.dot-speed  { background: #22c55e; }
+
+.select-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.btn-2p-toggle {
+  min-width: 140px;
+  min-height: 68px;
+  padding: 8px 20px;
+  background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+}
+
+.btn-2p-toggle.is-active-2p {
+  background: linear-gradient(180deg, #c084fc 0%, #7c3aed 100%);
+}
+
+.btn-start-go {
+  flex: 1;
+  min-height: 72px;
+  padding: 10px 28px;
+  background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%);
+}
+
+.btn-start-go .btn-label {
+  font-size: 24px;
+}
+
+/* ==========================================================================
+   3. Active Gameplay HUD — STRICTLY <= 5 CONTROLS, >= 64x64px, ZERO OVERLAP
+   ========================================================================== */
+.hud-status-strip {
+  position: fixed;
+  top: 10px;
+  left: 90px;
+  right: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  pointer-events: none !important;
+}
+
+.hud-pill {
+  pointer-events: none !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.62);
+  border: 2.5px solid rgba(255, 255, 255, 0.85);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 15px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+  white-space: nowrap;
+}
+
+.hud-clock-text {
+  font-variant-numeric: tabular-nums;
+  font-size: 17px;
+  color: #fde047;
+}
+
+.hud-mini-avatar {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+}
+
+.hud-mini-avatar svg {
+  width: 100%;
+  height: 100%;
+}
+
+.hud-stat-chips {
+  font-size: 14px;
+  letter-spacing: 0.3px;
+}
+
+.boss-hp-track {
+  width: 84px;
+  height: 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+  display: inline-block;
+}
+
+.boss-hp-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #fde047 0%, #ef4444 100%);
+  border-radius: 999px;
+}
+
+.score-chip {
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+/* The 5 interactive HUD controls */
+.hud-round-btn {
+  pointer-events: auto;
+  position: fixed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 3.5px solid #ffffff;
+  cursor: pointer;
+  padding: 0;
+  color: #ffffff;
+  box-shadow:
+    0 6px 16px rgba(15, 23, 42, 0.28),
+    inset 0 3px 5px rgba(255, 255, 255, 0.55);
+  touch-action: none;
+}
+
+.hud-round-btn:active {
+  transform: scale(0.94);
+}
+
+.hud-round-btn .hud-svg {
+  width: 68%;
+  height: 68%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.hud-round-btn .hud-svg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Control 1: Pause/Home (68x68 >= 64x64) */
+.hud-pos-home {
+  top: 10px;
+  left: 12px;
+  width: 68px;
+  height: 68px;
+  background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+}
+
+/* Control 2: Audio Mute/Unmute (68x68 >= 64x64) */
+.hud-pos-audio {
+  top: 10px;
+  right: 12px;
+  width: 68px;
+  height: 68px;
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+}
+
+.hud-pos-audio.is-muted {
+  background: linear-gradient(180deg, #94a3b8 0%, #475569 100%);
+}
+
+/* Control 3: Single Unified Virtual Joystick (136x136 >= 128x128, 0 child buttons!) */
+.hud-joystick-pad {
+  pointer-events: auto;
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  width: 136px;
+  height: 136px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  outline: none;
+}
+
+.joystick-base-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.joystick-base-svg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.joystick-thumb-knob {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 30%, #ffffff 0%, #7dd3fc 52%, #0284c7 100%);
+  border: 3px solid #ffffff;
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* Control 4: Secondary Rescue Needle Button (72x72 >= 68x68) */
+.hud-pos-item {
+  right: 118px;
+  bottom: 16px;
+  width: 72px;
+  height: 72px;
+  background: linear-gradient(180deg, #fbbf24 0%, #ea580c 100%);
+}
+
+.hud-pos-item.is-urgent-pulse {
+  animation: needleUrgent 0.55s ease-in-out infinite alternate;
+  box-shadow:
+    0 0 0 5px rgba(250, 204, 21, 0.75),
+    0 8px 22px rgba(244, 63, 94, 0.65);
+}
+
+@keyframes needleUrgent {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.1); }
+}
+
+.hud-item-count,
+.hud-bubble-quota {
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #0f172a;
+  border: 2px solid #ffffff;
+  color: #fde047;
+  font-size: 12px;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Control 5: Primary Drop Sugar Bubble Button (90x90 >= 80x80) */
+.hud-pos-bubble {
+  right: 16px;
+  bottom: 14px;
+  width: 90px;
+  height: 90px;
+  background: linear-gradient(180deg, #ff7eb3 0%, #ec4899 55%, #db2777 100%);
+}
+
+/* ==========================================================================
+   4. Pause Screen
+   ========================================================================== */
+.screen-paused {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  padding: 16px;
+}
+
+.pause-card {
+  pointer-events: auto;
+  width: min(440px, 100%);
+  padding: 22px 24px;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 4px solid #ffffff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.32);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.pause-badge {
+  font-size: 26px;
+  font-weight: 900;
+  color: #ec4899;
+}
+
+.pause-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pause-btn {
+  width: 100%;
+  min-height: 68px;
+}
+
+.btn-resume-green { background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%); }
+.btn-restart-amber { background: linear-gradient(180deg, #fbbf24 0%, #d97706 100%); }
+.btn-quit-blue { background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%); }
+
+/* ==========================================================================
+   5. Victory Podium Overlay (Center unobstructed for 3D Podium!)
+   ========================================================================== */
+.podium-frame {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 16px;
+  pointer-events: none;
+}
+
+.podium-top-banner {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.podium-headline {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 22px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(254, 243, 199, 0.92));
+  border: 3.5px solid #ffffff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.22);
+}
+
+.podium-crown {
+  width: 38px;
+  height: 30px;
+  display: inline-flex;
+}
+
+.podium-crown svg {
+  width: 100%;
+  height: 100%;
+}
+
+.podium-title-text {
+  font-size: 24px;
+  font-weight: 900;
+  color: #d97706;
+}
+
+.podium-rank-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.podium-rank-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.68);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.podium-rank-chip.is-winner {
+  background: rgba(217, 119, 6, 0.88);
+  border-color: #fde047;
+}
+
+.podium-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.podium-btn {
+  min-width: 168px;
+  min-height: 68px;
+  padding: 10px 22px;
+}
+
+.btn-again-green { background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%); }
+.btn-select-blue { background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%); }
+
+/* ==========================================================================
+   Responsive Layout A: Short Mobile Landscape (e.g. 844x390)
+   ========================================================================== */
+@media (max-height: 500px) {
+  .screen-title {
+    padding: 16px 16px 20px;
+  }
+
+  .title-hero-banner {
+    padding: 8px 20px;
+    gap: 12px;
+  }
+
+  .title-emblem {
+    width: 54px;
+    height: 54px;
+  }
+
+  .title-zh {
+    font-size: 32px;
+  }
+
+  .btn-giant-play {
+    min-width: 210px;
+    min-height: 70px;
+    padding: 8px 26px;
+  }
+
+  .screen-select {
+    padding: 8px 12px;
+  }
+
+  .select-shell {
+    flex-direction: row;
+    align-items: stretch;
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  .select-grid-column {
+    flex: 1;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .picker-row {
+    gap: 7px;
+  }
+
+  .picker-card,
+  .char-card {
+    min-height: 82px;
+    padding: 4px 4px;
+    border-radius: 16px;
+    gap: 2px;
+  }
+
+  .char-art {
+    width: 42px;
+    height: 42px;
+  }
+
+  .arena-art,
+  .mode-art {
+    width: 50px;
+    height: 36px;
+  }
+
+  .card-title {
+    font-size: 13px;
+  }
+
+  .select-action-bar {
+    width: 168px;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .btn-2p-toggle {
+    width: 100%;
+    min-width: 0;
+    min-height: 68px;
+    padding: 6px 12px;
+  }
+
+  .btn-start-go {
+    width: 100%;
+    min-height: 92px;
+    padding: 8px 12px;
+  }
+
+  .btn-start-go .btn-label {
+    font-size: 20px;
+  }
+
+  /* Active HUD on 844x390 */
+  .hud-joystick-pad {
+    left: 12px;
+    bottom: 12px;
+    width: 132px;
+    height: 132px;
+  }
+
+  .hud-pos-item {
+    right: 108px;
+    bottom: 14px;
+    width: 68px;
+    height: 68px;
+  }
+
+  .hud-pos-bubble {
+    right: 12px;
+    bottom: 12px;
+    width: 84px;
+    height: 84px;
+  }
+
+  .pause-card {
+    width: min(560px, 100%);
+    padding: 14px 18px;
+    gap: 10px;
+  }
+
+  .pause-actions {
+    flex-direction: row;
+    gap: 10px;
+  }
+
+  .pause-btn {
+    min-height: 66px;
+    padding: 8px 12px;
+  }
+
+  .podium-frame {
+    padding: 8px 12px 10px;
+  }
+
+  .podium-headline {
+    padding: 5px 16px;
+  }
+
+  .podium-title-text {
+    font-size: 19px;
+  }
+
+  .podium-btn {
+    min-height: 66px;
+    padding: 8px 18px;
+  }
+}
+
+/* ==========================================================================
+   Responsive Layout B: Narrow Mobile Portrait (e.g. 390x844)
+   ========================================================================== */
+@media (max-width: 560px) {
+  .screen-title {
+    padding: 28px 12px 36px;
+  }
+
+  .title-hero-banner {
+    padding: 12px 18px;
+    gap: 10px;
+  }
+
+  .title-emblem {
+    width: 56px;
+    height: 56px;
+  }
+
+  .title-zh {
+    font-size: 34px;
+  }
+
+  .title-sub {
+    font-size: 11px;
+    letter-spacing: 1.2px;
+  }
+
+  .screen-select {
+    padding: 10px;
+  }
+
+  .select-shell {
+    padding: 12px;
+    gap: 10px;
+    border-radius: 24px;
+  }
+
+  .picker-row-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .picker-row-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .picker-card,
+  .char-card {
+    min-height: 82px;
+    padding: 6px 4px;
+    border-radius: 18px;
+  }
+
+  .char-art {
+    width: 44px;
+    height: 44px;
+  }
+
+  .arena-art,
+  .mode-art {
+    width: 50px;
+    height: 36px;
+  }
+
+  .card-title {
+    font-size: 14px;
+  }
+
+  .select-action-bar {
+    gap: 8px;
+  }
+
+  .btn-2p-toggle {
+    min-width: 106px;
+    min-height: 68px;
+    padding: 6px 12px;
+  }
+
+  .btn-start-go {
+    min-height: 68px;
+    padding: 8px 16px;
+  }
+
+  .btn-start-go .btn-label {
+    font-size: 20px;
+  }
+
+  /* Active HUD on 390x844 */
+  .hud-status-strip {
+    top: 10px;
+    left: 84px;
+    right: 84px;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .hud-pill {
+    height: 30px;
+    padding: 2px 9px;
+    font-size: 12px;
+  }
+
+  .hud-p1-pill {
+    display: none;
+  }
+
+  .hud-clock-text {
+    font-size: 14px;
+  }
+
+  .hud-joystick-pad {
+    left: 14px;
+    bottom: 14px;
+    width: 136px;
+    height: 136px;
+  }
+
+  .hud-pos-item {
+    right: 112px;
+    bottom: 16px;
+    width: 72px;
+    height: 72px;
+  }
+
+  .hud-pos-bubble {
+    right: 12px;
+    bottom: 14px;
+    width: 88px;
+    height: 88px;
+  }
+
+  .podium-bottom-bar {
+    width: 100%;
+    gap: 10px;
+  }
+
+  .podium-btn {
+    flex: 1;
+    min-width: 0;
+    min-height: 68px;
+    padding: 8px 12px;
+  }
+
+  .podium-btn .btn-label {
+    font-size: 17px;
+  }
+}

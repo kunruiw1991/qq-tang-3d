@@ -1,0 +1,19 @@
+# Teamwork & orchestration internal metadata (never publish to GitHub)
+.agents/
+PROJECT.md
+TEST_INFRA.md
+TEST_READY.md
+DEAD_ENDS.md
+GATE_STATUS.md
+
+# Python & OS scratch artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.log
+*.tmp
+*.bak
+test_report*.json
+.DS_Store
+Thumbs.db
